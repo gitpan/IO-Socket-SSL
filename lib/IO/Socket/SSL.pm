@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL_NetSSLeay.pm,v 1.2 1999/07/21 19:24:12 aspa Exp $.
+# $Id: SSL_NetSSLeay.pm,v 1.5 1999/07/29 13:40:57 aspa Exp $.
 #
 
 #
@@ -28,6 +28,7 @@
 #
 # TODO:
 # -----
+# - error handling: a server side view.
 #
 #
 
@@ -35,11 +36,14 @@ package IO::Socket::SSL;
 
 use strict;
 use Carp;
-use IO::Socket;
-use Net::SSLeay;
 use English;
+use POSIX qw(getcwd);
 
-$IO::Socket::SSL::VERSION = '0.72';
+use Net::SSLeay;
+use IO::Socket;
+
+
+$IO::Socket::SSL::VERSION = '0.73';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -50,6 +54,9 @@ Net::SSLeay::randomize();
 $IO::Socket::SSL::SSL_Context_obj = 0;
 $IO::Socket::SSL::DEBUG = 0;
 
+if($IO::Socket::SSL::DEBUG) {
+  print STDERR "\nusing **SSL_NetSSLeay.pm: v$IO::Socket::SSL::VERSION\n";
+}
 
 #
 # ***** set default values for key and cert files etc.
@@ -59,7 +66,7 @@ my $DEFAULT_SERVER_CERT_FILE = "certs/server-cert.pem";
 my $DEFAULT_CLIENT_KEY_FILE = "certs/client-key.pem";
 my $DEFAULT_CLIENT_CERT_FILE = "certs/client-cert.pem";
 my $DEFAULT_CA_FILE = "certs/my-ca.pem";
-my $DEFAULT_CA_PATH = $ENV{'PWD'} . "/certs";
+my $DEFAULT_CA_PATH = getcwd() . "/certs";
 my $DEFAULT_IS_SERVER = 0;
 my $DEFAULT_USE_CERT = 0;
 # &Net::SSLeay::VERIFY_NONE, &Net::SSLeay::VERIFY_PEER();
@@ -295,17 +302,12 @@ sub sysread {
   }
   my $read_len = length($int_buf);
 
-  # EOF handling: we've had an EOF if the number of bytes read
-  # is _fewer_ than were requested.
-  if( ($read_len < $max_len) || ($read_len == 0) ) {
-    if( ! ${*$self}{'_EOF'} ) {
-      ${*$self}{'_EOF'} = 1;
-    } else {
-      # N.B.: perl sysread semantics require that the buffer
-      # is set to "" when read past EOF.
-      $_[1] = "$int_buf";
-    }
-    if ($read_len == 0) { return 0; }
+  # EOF handling: we've had an EOF if Net::SSLeay::read() returns 0.
+  if( $read_len == 0 ) {
+    # N.B.: perl sysread() semantics seem to require that
+    # the buffer is set to "" when an EOF is encountered.
+    $_[1] = "";
+    return 0;
   }
 
   if(!defined($_[1])) { $_[1] = ""; } # initialize uninitialized buffer.
@@ -318,7 +320,8 @@ sub sysread {
   if ( ($start >= 0) && ($start <= $buffer_len) ) {
     substr($_[1], $start, $elen) = "$int_buf";
   } else {
-    croak '$fh->sysread(): offset outside of buffer.';
+    croak '$fh->sysread(): offset outside of buffer.' .
+      " ('$_[1]' : $start / $buffer_len / $read_len).";
   }
 
   return $read_len;
@@ -469,7 +472,7 @@ sub _myerror {
 
   carp $errstr if $IO::Socket::SSL::DEBUG;
   if($fh && defined fileno($fh)) {
-    $fh->close();
+    #$fh->close();
   }
   return undef;
 }
@@ -622,7 +625,7 @@ sub new {
 
   # create SSL context;
   if(! ($ctx = Net::SSLeay::CTX_new()) ) {
-    my $err_str = $self->_get_SSL_err_str();
+    my $err_str = IO::Socket::SSL::_get_SSL_err_str();
     return IO::Socket::SSL::_myerror("CTX_new(): '$err_str'.");
   }
 
@@ -633,7 +636,7 @@ sub new {
   if(!($r = Net::SSLeay::CTX_load_verify_locations($ctx,
 						   $ca_file,
 						   $ca_path))) {
-    my $err_str = $self->_get_SSL_err_str();
+    my $err_str = IO::Socket::SSL::_get_SSL_err_str();
     return IO::Socket::SSL::_myerror("CTX_load_verify_locations: " .
 				     "'$err_str'.");
   }
@@ -648,13 +651,13 @@ sub new {
   if( $is_server || $use_cert ) {
     if(!($r=Net::SSLeay::CTX_use_RSAPrivateKey_file($ctx,
 		 $key_file, &Net::SSLeay::FILETYPE_PEM() ))) {
-      my $err_str = $self->_get_SSL_err_str();    
+      my $err_str = IO::Socket::SSL::_get_SSL_err_str();    
       return IO::Socket::SSL::_myerror("CTX_use_RSAPrivateKey_file:" .
 				       " '$err_str'.");
     }
     if(!($r=Net::SSLeay::CTX_use_certificate_file($ctx,
 		 $cert_file, &Net::SSLeay::FILETYPE_PEM() ))) {
-      my $err_str = $self->_get_SSL_err_str();    
+      my $err_str = IO::Socket::SSL::_get_SSL_err_str();    
       return IO::Socket::SSL::_myerror("CTX_use_certificate_file:" .
 				       " '$err_str'.");
     }
@@ -723,7 +726,7 @@ sub subject_name {
   my ($name, $str_name);
 
   if(!($name = Net::SSLeay::X509_get_subject_name($cert))) {
-    my $err_str = $self->_get_SSL_err_str();    
+    my $err_str = IO::Socket::SSL::_get_SSL_err_str();    
     return IO::Socket::SSL::_myerror("X509_get_subject_name: " .
 				     "'$err_str'.");
   }
@@ -740,7 +743,7 @@ sub issuer_name {
   my ($name, $str_name);
 
   if(!($name = Net::SSLeay::X509_get_issuer_name($cert))) {
-    my $err_str = $self->_get_SSL_err_str();    
+    my $err_str = IO::Socket::SSL::_get_SSL_err_str();    
     return IO::Socket::SSL::_myerror("X509_get_issuer_name:" .
 				     " '$err_str'.");    
   }

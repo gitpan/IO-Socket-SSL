@@ -21,3 +21,5 @@ demo/daemon.pl
 util/export_certs.pl
 diffs/HTTP_Daemon.pm.diff
 diffs/LWP_Protocol_https.pm.diff
+experimental/openssl-swig.tar.gz
+experimental/netssleay-openssl.diff

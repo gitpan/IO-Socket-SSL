@@ -1,21 +1,20 @@
 #
 # a test client for testing IO::Socket::SSL's behavior (aspa@hip.fi).
 #
-# $Id: test1.t,v 1.4 1999/06/18 13:40:11 aspa Exp aspa $.
+# $Id: test1.t,v 1.5 1999/07/22 20:10:09 aspa Exp $.
 #
 
 use IO::Socket::SSL;
 
 my ($v_mode, $sock);
 
-$v_mode = &Net::SSLeay::VERIFY_PEER();
 
 print "1..4\n";
 
 if(!($sock = IO::Socket::SSL->new( PeerAddr => 'www.hip.fi',
 			    PeerPort => '443',
 			    Proto    => 'tcp',
-			    SSL_verify_mode => $v_mode,
+			    SSL_verify_mode => 0x01,
 			  )) ) {
   print STDERR "unable to create a IO::Socket::SSL object.\n";
   print "not ok\n";

@@ -2,7 +2,7 @@
 # a test server for testing IO::Socket::SSL-class's behavior
 # (aspa@hip.fi).
 #
-# $Id: ssl_server.pl,v 1.6 1999/06/18 13:31:07 aspa Exp aspa $.
+# $Id: ssl_server.pl,v 1.7 1999/07/22 20:13:20 aspa Exp $.
 #
 
 use strict;
@@ -11,14 +11,12 @@ use IO::Socket::SSL;
 
 my ($sock, $s, $v_mode);
 
-#$v_mode = &Net::SSLeay::VERIFY_NONE();
-$v_mode = &Net::SSLeay::VERIFY_PEER();
 
 if(!($sock = IO::Socket::SSL->new( Listen => 5,
 				   LocalAddr => 'localhost',
 				   LocalPort => 9000,
 				   Proto     => 'tcp',
-				   SSL_verify_mode => $v_mode,
+				   SSL_verify_mode => 0x01,
 				 )) ) {
   print STDERR "unable to create socket: $!.\n";
   exit(0);
