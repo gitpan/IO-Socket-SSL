@@ -1,5 +1,12 @@
 
-v0.79
+v0.80	20010819
+	- fixed startTLS support (socketToSSL) (Graham Barr <gbarr@pobox.com>)
+	- make accept() set fileno attribute on newly created IO::Socket::SSL
+	  object (Martin Oldfield <m@mail.tc>).
+	- certificate updates.
+	- use SSL_CTX_use_PrivateKey_file in SSL_Context::new.
+
+v0.79	20010604
 	- angle bracket readline operator support
 	  (David Darville <david@dark.x.dtu.dk>).
 	- eliminate warnings in choosing SSL protocol version.

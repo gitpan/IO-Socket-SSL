@@ -2,6 +2,7 @@ MANIFEST
 Changes
 README
 BUGS
+TODO
 Makefile.PL
 lib/IO/Socket/SSL.pm
 certs/client-cert.pem

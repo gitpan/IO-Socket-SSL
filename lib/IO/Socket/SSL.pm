@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.35 2001/06/04 07:52:53 aspa Exp $.
+# $Id: SSL.pm,v 1.40 2001/08/19 08:14:47 aspa Exp $.
 #
 
 #
@@ -44,7 +44,7 @@ use Net::SSLeay;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.79';
+$IO::Socket::SSL::VERSION = '0.80';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -219,6 +219,7 @@ sub accept {
     return $self->_myerror("accept failed: '$!'.\n");
   }
   my $fileno = fileno($newsock);
+  ${*$newsock}{'_fileno'} = $fileno;
 
   # create the SSL object.
   if( ! ($ssl_obj = SSL_SSL->new($newsock, $args)) ) {
@@ -420,7 +421,7 @@ sub FILENO {
 
 # ***** socketToSSL
 
-# preliminary support for startTLS.
+# support for startTLS.
 sub socketToSSL {
   my $sock = shift;
   my $r;
@@ -443,9 +444,11 @@ sub socketToSSL {
     my $err_str = IO::Socket::SSL::_get_SSL_err_str();
     return undef; # SSL_connect failed.
   }
+
   bless $sock, "IO::Socket::SSL";
+  my $tiedhandle = tie *{$sock}, "IO::Socket::SSL", $sock;
   
-  return $sock;
+  return $tiedhandle;
 }
 
 # ***** get_verify_mode
@@ -748,9 +751,9 @@ sub new {
 
   # load certificate and private key.
   if( $is_server || $use_cert ) {
-    print STDERR "loading RSA key ($key_file).\n"
+    print STDERR "loading private key ($key_file).\n"
       if ($IO::Socket::SSL::DEBUG);
-    if(!($r=Net::SSLeay::CTX_use_RSAPrivateKey_file($ctx,
+    if(!($r=Net::SSLeay::CTX_use_PrivateKey_file($ctx,
 		 $key_file, &Net::SSLeay::FILETYPE_PEM() ))) {
       my $err_str = IO::Socket::SSL::_get_SSL_err_str();    
       return IO::Socket::SSL::_myerror("CTX_use_RSAPrivateKey_file:" .
