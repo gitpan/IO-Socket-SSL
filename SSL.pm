@@ -20,7 +20,7 @@ use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.90';
+    $VERSION = '0.901';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -271,7 +271,7 @@ sub close {
 		      and !$close_args->{_SSL_in_DESTROY});
 
     ${*$self}{'_SSL_opened'}=0;
-    $self->SUPER::close;
+    $self->SUPER::close unless ($close_args->{_SSL_in_DESTROY});
 }
 
 sub fileno {
@@ -781,7 +781,7 @@ next day on CPAN. Otherwise, it could take weeks . . .
 
 IO::Socket::SSL uses Net::SSLeay as the shiny interface to OpenSSL, which is
 the shiny interface to the ugliness of SSL.  As a result, you will need both Net::SSLeay
-(1.18 recommended) and OpenSSL (0.9.6g recommended) on your computer before
+(1.19 recommended) and OpenSSL (0.9.6g recommended) on your computer before
 using this module.
 
 =head1 DEPRECATIONS

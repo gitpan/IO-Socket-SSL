@@ -1,5 +1,11 @@
 None.  See documentation.
 
+Versions of perl-ldap below v0.26 do not work with this version
+of IO::Socket::SSL because they contain a workaround for old
+versions of IO::Socket::SSL that breaks new versions.
+
+---------------------
+
 One user mentioned that the following did not work as it should in
 IO::Socket::SSL, but worked in IO::Socket::INET:
 

@@ -1,4 +1,11 @@
-v0.90
+v0.901
+	- Fixed the warning that happens when sockets are not explicitly
+	  closed() before the program terminates.  
+
+
+--- Old Versions --------------------------------------------------
+
+v0.90   2002.08.13
 	- This version is a complete rewrite of IO::Socket::SSL.  It now 
 	  has about half the lines of code, twice the amount of documentation, 
 	  and a slightly more polished interface.
@@ -45,8 +52,6 @@ v0.90
 	  will be properly freed.
 	- All other known bugs have been fixed.
 
-
---- Old Versions --------------------------------------------------
 
 v0.81a (Not publically released)
 	- Added support for SSL_passwd_cb.
