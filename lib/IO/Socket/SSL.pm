@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.17 2000/11/17 14:17:16 aspa Exp $.
+# $Id: SSL.pm,v 1.19 2001/01/09 12:38:00 aspa Exp aspa $.
 #
 
 #
@@ -44,7 +44,7 @@ use Net::SSLeay;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.76';
+$IO::Socket::SSL::VERSION = '0.77';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -73,7 +73,7 @@ my $DEFAULT_USE_CERT = 0;
 # &Net::SSLeay::VERIFY_NONE, &Net::SSLeay::VERIFY_PEER();
 my $DEFAULT_VERIFY_MODE = &Net::SSLeay::VERIFY_PEER();
 my $DEFAULT_CIPHER_LIST = "ALL:!LOW:!EXP";
-
+my $DEFAULT_SSL_VERSION = "3";
 
 #
 # ******************** IO::Socket::SSL class ********************
@@ -673,23 +673,33 @@ sub new {
       $args->{'SSL_verify_mode'} : $DEFAULT_VERIFY_MODE;
   $use_cert = $args->{'SSL_use_cert'} || $DEFAULT_USE_CERT;
 
+  my $CTX_constructor = undef;
+  if($DEFAULT_SSL_VERSION == 2) {
+    $CTX_constructor = \&Net::SSLeay::CTX_v2_new;
+  } elsif ($DEFAULT_SSL_VERSION == 3) {
+    $CTX_constructor = \&Net::SSLeay::CTX_v3_new;
+  } else { # SSL v23
+    $CTX_constructor = \&Net::SSLeay::CTX_new;
+  }
 
   # create SSL context;
-  if(! ($ctx = Net::SSLeay::CTX_new()) ) {
+  if(! ($ctx = &{$CTX_constructor}() ) ) {
     my $err_str = IO::Socket::SSL::_get_SSL_err_str();
     return IO::Socket::SSL::_myerror("CTX_new(): '$err_str'.");
   }
 
-  # set options for the context.
-  $r = Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL() );
-
-  # set SSL certificate load paths.
-  if(!($r = Net::SSLeay::CTX_load_verify_locations($ctx,
-						   $ca_file,
-						   $ca_path))) {
-    my $err_str = IO::Socket::SSL::_get_SSL_err_str();
-    return IO::Socket::SSL::_myerror("CTX_load_verify_locations: " .
-				     "'$err_str'.");
+  if( !($verify_mode == &Net::SSLeay::VERIFY_NONE()) ) {
+      # set options for the context.
+      $r = Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL() );
+      
+      # set SSL certificate load paths.
+      if(!($r = Net::SSLeay::CTX_load_verify_locations($ctx,
+						       $ca_file,
+						       $ca_path))) {
+	  my $err_str = IO::Socket::SSL::_get_SSL_err_str();
+	  return IO::Socket::SSL::_myerror("CTX_load_verify_locations: " .
+					   "'$err_str'.");
+      }
   }
 
   # NOTE: private key, certificate and certificate verification

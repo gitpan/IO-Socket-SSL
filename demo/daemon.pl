@@ -1,7 +1,7 @@
 #
 # test HTTP::Daemon with IO::Socket::SSL (aspa@kronodoc.fi).
 #
-# $Id: daemon.pl,v 1.3 2000/11/08 09:24:56 aspa Exp $.
+# $Id: daemon.pl,v 1.4 2001/01/15 13:38:32 aspa Exp $.
 #
 
 # NB: to use this demo script HTTP::Daemon and
@@ -26,6 +26,7 @@ $r = IO::Socket::SSL::context_init({
 my $d = HTTP::Daemon->new(UseSSL => 1);
 print "Please contact me at: <URL:", $d->url, ">\n";
 while (my $c = $d->accept) {
+  print STDERR "accepted.\n";
   while (my $r = $c->get_request) {
     if ($r->method eq 'GET' and $r->url->path eq "/xyzzy") {
       $c->send_file_response("/etc/hosts");

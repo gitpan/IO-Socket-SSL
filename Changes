@@ -1,3 +1,8 @@
+v0.77
+	20010115
+	- don't setup SSL CA verification unless cert verification is
+	  actually used for the connections.
+	- default SSL protocol version selection in SSL.pm.
 
 v0.76	20001117
 	- patch from Kwok Chern Yue <chernyue@post1.com> for
