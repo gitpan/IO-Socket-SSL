@@ -20,7 +20,7 @@ use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.91';
+    $VERSION = '0.92';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -289,7 +289,6 @@ sub close {
 
 sub fileno {
     my $self = shift;
-    return unless($self->get_ssl_object);
     return ${*$self}{'_SSL_fileno'} || $self->SUPER::fileno();
 }
 
@@ -486,10 +485,10 @@ sub new {
     }
 
     foreach ($arg_hash->{'SSL_version'}) {
-	$ctx = /sslv2/i ? &Net::SSLeay::CTX_v2_new() :
-	       /sslv3/i ? &Net::SSLeay::CTX_v3_new() :
-	       /tlsv1/i ? &Net::SSLeay::CTX_tlsv1_new() :
-	                  &Net::SSLeay::CTX_new();
+	$ctx = /^sslv2$/i ? &Net::SSLeay::CTX_v2_new() :
+	       /^sslv3$/i ? &Net::SSLeay::CTX_v3_new() :
+	       /^tlsv1$/i ? &Net::SSLeay::CTX_tlsv1_new() :
+	                    &Net::SSLeay::CTX_new();
     }
 
     $ctx || return(IO::Socket::SSL->error("Context-init failed"));

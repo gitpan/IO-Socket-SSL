@@ -1,11 +1,18 @@
-v0.91
-	- Added support for SSL_peek and SSL_pending (peek() and
-	  pending()).  Updated documentation, tests, etc. to reflect
-	  this.
+v0.92
+	- Changed the fileno() function to support returning the fileno
+	  of server sockets.  (Problem found by Roland Giersig
+	  <RGiersig@cpan.org>).
+	- Fixed SSL_version incorrectly defaulting to SSLv2 (patch from
+	  Roland Alder <roland.alder@celeris.ch>).
 
 
 
 --- Old Versions --------------------------------------------------
+
+v0.91   2002.08.31
+	- Added support for SSL_peek and SSL_pending (peek() and
+	  pending()).  Updated documentation, tests, etc. to reflect
+	  this.
 
 v0.901  2002.08.19
 	- Fixed the warning that happens when sockets are not explicitly

@@ -13,7 +13,7 @@ $OPENSSL_VERSION = 0;
 $OPENSSL_VERSION = &Net::SSLeay::OPENSSL_VERSION_NUMBER if ($NET_SSLEAY_VERSION>=1.19);
 $CAN_PEEK = ($OPENSSL_VERSION >= 0x0090601f) ? 1 : 0;
 
-$numtests = 25;
+$numtests = 26;
 $|=1;
 
 foreach ($^O) {
@@ -158,6 +158,8 @@ if (!$server) {
 }
 &ok("server");
 
+print "not " if (!defined fileno($server));
+&ok("server");
 
 my $client = $server->accept;
 
