@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.40 2001/08/19 08:14:47 aspa Exp $.
+# $Id: SSL.pm,v 1.55 2002/03/18 06:46:27 aspa Exp $.
 #
 
 #
@@ -40,11 +40,11 @@ use Carp;
 use English;
 use POSIX qw(getcwd);
 
-use Net::SSLeay;
+use Net::SSLeay 1.08;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.80';
+$IO::Socket::SSL::VERSION = '0.81';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -81,16 +81,23 @@ my $DEFAULT_SSL_VERSION = undef;
 
 # class attributes:
 # -----------------
-# - SSL_Context_obj
-# - DEBUG
-# - _SSL_SSL_obj
-# - _arguments
+# SSL_Context_obj, DEBUG
+#
+# instance attributes:
+# --------------------
+# _fileno - call to overrided fileno() result in infinite recursion as
+#           our parent (IO::Handle) calls fileno() in fileno(). for this
+#           reason fileno() has to be implemented without using fileno().
+# _opened - see _fileno.
+# _SSL_SSL_obj - encapsulates the underlying SSL connection object
+# _arguments - arguments used when creating the IO::Socket::SSL object
+# _SSL_want_read  - for non-blocking IO
+# _SSL_want_write - for non-blocking IO
 #
 # private methods:
 # ----------------
-# - _init_SSL, _unsupported, _unimplemented,
-#   _myerror, _get_SSL_err_str.
-
+# _init_SSL, _unsupported, _unimplemented, _myerror, _get_SSL_err_str
+#
 
 sub context_init {
   my $args = shift;
@@ -99,11 +106,21 @@ sub context_init {
   if ( ! defined ($ctx = SSL_Context->new($args)) ) {
     return $ctx;
   }
-  $IO::Socket::SSL::SSL_Context_obj = $ctx;
+  set_global_context($ctx);
 
   return 1;
 }
 
+sub set_global_context {
+  my $ctx = shift;
+  if($ctx) { $ctx->{'_isGlobalCtx'} = 1; } # not when resetting
+  $IO::Socket::SSL::SSL_Context_obj = $ctx;
+}
+
+sub get_global_context {
+  my $ctx = $IO::Socket::SSL::SSL_Context_obj;
+  return $ctx;
+}
 
 # object creation call stack:
 # - new IO::Socket::SSL
@@ -116,17 +133,31 @@ sub context_init {
 
 sub new {
   my $class = shift || "IO::Socket::SSL";
-
   my $self;
+
   if( !($self = $class->SUPER::new(@_)) ) {
     return undef;
   }
-  ${*$self}{'_fileno'} = fileno($self);
 
-  bless $self, $class;
-  my $tiedhandle = tie *{$self}, $class, $self;
+  _preBlessInitAttrs($self, fileno($self));
 
-  return $tiedhandle;
+  #bless $self, $class;
+  tie *{$self}, 'SSL_HANDLE', $self;
+
+  return $self;
+}
+
+# initialize instance attributes.
+sub _preBlessInitAttrs {
+  my $self = shift;
+  my $fileno = shift;
+
+  # NB: do not set '_opened', '_SSL_SSL_obj', '_arguments'.
+
+  ${*$self}{'_fileno'} = $fileno;
+  ${*$self}{'_SSL_want_read'} = 0;
+  ${*$self}{'_SSL_want_write'} = 0;
+  return 1;
 }
 
 
@@ -139,11 +170,8 @@ sub configure {
 
   my ($r, $k, $v, $ctx_obj, $ctx_created, $ssl_obj);
 
-  # set instance attributes.
-  ${*$self}{'_SSL_SSL_obj'} = undef;
-  ${*$self}{'_EOF'} = 0;
-
-  $ctx_obj = $IO::Socket::SSL::SSL_Context_obj;
+  # choose context object to use: parameter or global.
+  $ctx_obj = $args->{'SSL_CTX'} || get_global_context();
 
   # SSL_Context::new sets up SSL context. it's run only once.
   if(! $ctx_obj ) { 
@@ -155,7 +183,7 @@ sub configure {
       return undef;
     } else {
       # a valid context was returned. save it.
-      $IO::Socket::SSL::SSL_Context_obj = $ctx_obj;
+      set_global_context($ctx_obj);
     }
   }
 
@@ -219,7 +247,7 @@ sub accept {
     return $self->_myerror("accept failed: '$!'.\n");
   }
   my $fileno = fileno($newsock);
-  ${*$newsock}{'_fileno'} = $fileno;
+  _preBlessInitAttrs($newsock, $fileno);
 
   # create the SSL object.
   if( ! ($ssl_obj = SSL_SSL->new($newsock, $args)) ) {
@@ -235,7 +263,7 @@ sub accept {
 
   # make $newsock a IO::Socket::SSL object and tie it.
   bless $newsock, $class;
-  my $tiedhandle = tie *{$newsock}, $class, $newsock;
+  tie *{$newsock}, 'SSL_HANDLE', $newsock;
 
 
   print STDERR "accept: self: $self, newsock: $newsock, fileno: $fileno.\n"
@@ -265,7 +293,7 @@ sub syswrite {
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
   my $ssl = $ssl_obj->get_ssl_handle();
 
-  my ($res, $len, $real_len, $wbufref);
+  my ($res, $len, $real_len, $wbufref, $ssl_err);
 
 
   # obtain a buffer ref to write buffer.
@@ -277,12 +305,26 @@ sub syswrite {
   } else {
     $len = $arg_len; 
   }
+
+  # previous operations don't count.
+  ${*$self}{'_SSL_want_read'} = 0;
+  ${*$self}{'_SSL_want_write'} = 0;
   
   # see Net_SSLeay-1.03/SSLeay.xs,
   # openssl-0.9.1c/ssl/ssl_lib.c and bio_ssl.c.
   if( ($res = Net::SSLeay::write($ssl, $$wbufref)) < 0 ) {
-    my $err_str = $self->_get_SSL_err_str();
-    return $self->_myerror("SSL_write: '$err_str'.");
+    if( ($ssl_err = Net::SSLeay::get_error($ssl, -1)) ) {
+      # '-1' safe as of openssl-0.9.6b/ssl/ssl_lib.c
+      if ($ssl_err == &Net::SSLeay::ERROR_WANT_READ) {
+        # possible if a renogotiation is taking place
+        ${*$self}{'_SSL_want_read'} = 1;
+      } elsif ($ssl_err == &Net::SSLeay::ERROR_WANT_WRITE) {
+        ${*$self}{'_SSL_want_write'} = 1;
+      } else {
+	my $err_str = $self->_get_SSL_err_str();
+      }
+    }
+    return undef;
   }
 
   return $res;
@@ -300,17 +342,32 @@ sub sysread {
   my $max_len = $_[2];
   my $offset = $_[3] || 0;
 
-  my $int_buf;
+  my ($int_buf, $ssl_err);
 
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
   my $ssl = $ssl_obj->get_ssl_handle();
 
+  # previous operations don't count.
+  ${*$self}{'_SSL_want_read'} = 0;
+  ${*$self}{'_SSL_want_write'} = 0;
+
   # see Net_SSLeay-1.03/SSLeay.xs,
   # openssl-0.9.1c/ssl/ssl_lib.c and bio_ssl.c.
   if( ! defined ($int_buf = Net::SSLeay::read($ssl, $max_len)) ) {
-    my $err_str = $self->_get_SSL_err_str();
-    return $self->_myerror("SSL_read: '$err_str'.");
+    if( ($ssl_err = Net::SSLeay::get_error($ssl, -1)) ) {
+      # '-1' safe as of openssl-0.9.6b/ssl/ssl_lib.c
+      if ($ssl_err == &Net::SSLeay::ERROR_WANT_READ) {
+	${*$self}{'_SSL_want_read'} = 1;
+      } elsif ($ssl_err == &Net::SSLeay::ERROR_WANT_WRITE) {
+	# possible if a renogotiation is taking place
+	${*$self}{'_SSL_want_write'} = 1;
+      } else {
+	my $err_str = $self->_get_SSL_err_str();
+      }
+    }
+    return undef;
   }
+
   my $read_len = length($int_buf);
 
   # EOF handling: we've had an EOF if Net::SSLeay::read() returns 0.
@@ -335,6 +392,20 @@ sub sysread {
   }
 
   return $read_len;
+}
+
+sub want_read {
+  my $self = shift;
+
+  my $v = $ {*$self}{'_SSL_want_read'};
+  return $v;
+}
+
+sub want_write {
+  my $self = shift;
+
+  my $v = $ {*$self}{'_SSL_want_write'};
+  return $v;
 }
 
 # ***** readline
@@ -396,26 +467,14 @@ sub close {
   my $self = shift;
 
   print STDERR "close: $self.\n" if $IO::Socket::SSL::DEBUG;
-  # NB: the next two lines seem to result in SIGSEGV with perl v5.6.0
-  #     on my linux system.
-  #my $prev = untie(*$self);
-  #return $self->SUPER::close();
+  untie(*$self);
   ${*$self}{'_opened'} = 0;
-  return 1;
+  return $self->SUPER::close();
 }
 
 sub opened {
   my $self = shift;
   return ${*$self}{'_opened'};
-}
-
-# **** FILENO
-
-sub FILENO {
-  my $self = shift;
-  my $fileno = ${*$self}{'_fileno'};
-
-  return $fileno;
 }
 
 
@@ -424,31 +483,35 @@ sub FILENO {
 # support for startTLS.
 sub socketToSSL {
   my $sock = shift;
+  my $args = shift || {};
   my $r;
 
   if(!$sock) {
     croak 'usage: IO::Socket::SSL::socketToSSL(socket)';
   }
+  _preBlessInitAttrs($sock, fileno($sock));
 
   # transform IO::Socket::INET to IO::Socket::SSL.
 
   # create an SSL object.
   my $ssl_obj;
-  if( ! ($ssl_obj = SSL_SSL->new($sock, {})) ) {
-    return undef; # can't create SSL_SSL.
+  if( ! ($ssl_obj = SSL_SSL->new($sock, $args)) ) {
+    my $err_str = IO::Socket::SSL::_get_SSL_err_str();
+    return IO::Socket::SSL::_myerror($sock, "socketToSSL(): " .
+				     "unable to create SSL object");
   }
-  $ {*$sock} {'_SSL_SSL_obj'} = $ssl_obj;
+  ${*$sock}{'_SSL_SSL_obj'} = $ssl_obj;
 
   my $ssl = $ssl_obj->get_ssl_handle();
   if ( ($r = Net::SSLeay::connect($ssl)) <= 0 ) { # ssl/s23_clnt.c
     my $err_str = IO::Socket::SSL::_get_SSL_err_str();
-    return undef; # SSL_connect failed.
+    return IO::Socket::SSL::_myerror($sock,"socketToSSL(): connect failed");
   }
 
   bless $sock, "IO::Socket::SSL";
-  my $tiedhandle = tie *{$sock}, "IO::Socket::SSL", $sock;
+  tie *{$sock}, 'SSL_HANDLE', $sock;
   
-  return $tiedhandle;
+  return $sock;
 }
 
 # ***** get_verify_mode
@@ -458,7 +521,9 @@ sub get_verify_mode {
 
   # get verify mode from SSL_SSL!
 
-  my $ctx_obj = $IO::Socket::SSL::SSL_Context_obj;
+  # get SSL context.
+  my $args = ${*$self}{'_arguments'};
+my $ctx_obj = $args->{'SSL_CTX'} || get_global_context();
   my $ctx = $ctx_obj->get_context_handle;
 
   # Net::SSLeay does not implement this function, yet.
@@ -510,17 +575,6 @@ sub DESTROY {
       if $IO::Socket::SSL::DEBUG;
 
 }
-
-# ***** define filehandle tying interface.
-sub TIEHANDLE { return $_[1]; }
-*PRINT = \&print;
-*PRINTF = \&printf;
-*WRITE = \&write;
-*READLINE = \&readline;
-*GETC = \&getc;
-*READ = \&read;
-*CLOSE = \&close;
-
 
 # ***** unsupported methods.
 
@@ -574,14 +628,67 @@ sub _get_SSL_err_str {
 
 1;
 
+
+#
+# ******************** SSL_HANDLE ********************
+#
+
+package SSL_HANDLE;
+
+# ***** define filehandle tying interface.
+sub TIEHANDLE {
+    my $class = shift;
+    my $tie_handle = shift;
+
+    return bless \$tie_handle, $class;
+}
+sub PRINT {
+    my $tie_handle = shift;
+    return ${$tie_handle}->print(@_);
+}
+sub PRINTF {
+    my $tie_handle = shift;
+    return ${$tie_handle}->printf(@_);
+}
+sub WRITE {
+    my $tie_handle = shift;
+    return ${$tie_handle}->write(@_);
+}
+sub READLINE {
+    my $tie_handle = shift;
+    return ${$tie_handle}->readline(@_);
+}
+sub GETC {
+    my $tie_handle = shift;
+    return ${$tie_handle}->getc(@_);
+}
+sub READ {
+    my $tie_handle = shift;
+    return ${$tie_handle}->read(@_);
+}
+sub CLOSE {
+    my $tie_handle = shift;
+    return ${$tie_handle}->close(@_);
+}
+sub FILENO {
+  my $tie_handle = shift;
+  my $fileno = ${*${$tie_handle}}{'_fileno'};
+  return $fileno;
+}
+
+1;
+
+
 #
 # ******************** SSL_SSL class ********************
 #
 
 package SSL_SSL;
 
-# class attributes:
-# - _SSL_ssl_handle.
+# instance attributes:
+# --------------------
+# _SSL_ssl_handle
+#
 
 @SSL_SSL::ISA = ();
 
@@ -598,12 +705,12 @@ sub new {
   bless $self, $class;
 
   my ($r, $ssl);
-  my $ctx_obj = $IO::Socket::SSL::SSL_Context_obj;
+  my $ctx_obj = $args->{'SSL_CTX'} || IO::Socket::SSL::get_global_context();
   my $ctx = $ctx_obj->get_context_handle;
 
   my $cipher_list = $args->{'SSL_cipher_list'} || $DEFAULT_CIPHER_LIST;
   my $verify_mode = (defined $args->{'SSL_verify_mode'}) ? 
-    $args->{'SSL_verify_mode'} : undef;
+    $args->{'SSL_verify_mode'} : $DEFAULT_VERIFY_MODE;
 
 
   # create a new SSL structure and attach it to the context.
@@ -663,8 +770,10 @@ sub DESTROY {
 
 package SSL_Context;
 
-# class attributes:
-# - _SSL_context.
+# instance attributes:
+# --------------------
+# _SSL_context
+#
 
 @SSL_Context::ISA = ();
 
@@ -776,6 +885,18 @@ sub new {
   return $self;
 }
 
+# b IO::Socket::SSL::configure
+sub getConnection {
+  my $self = shift;
+  my $class = shift;
+
+  push @_, 'SSL_CTX', $self;
+
+  my $sock = $class->new(@_);
+
+  return $sock;
+}
+
 sub get_context_handle {
   my $self = shift;
 
@@ -798,9 +919,11 @@ sub DESTROY {
   }
 
   # IO::Socket::SSL specific.
-  if(defined($IO::Socket::SSL::SSL_Context_obj)) {
-    $IO::Socket::SSL::SSL_Context_obj = 0;
+  my $gCtx = IO::Socket::SSL::get_global_context();
+  if($self->{'_isGlobalCtx'} && $gCtx && ($gCtx == $ctx)) {
+    IO::Socket::SSL::set_global_context(0);
   }
+  return;
 }
 
 
@@ -817,8 +940,10 @@ sub DESTROY {
 
 package X509_Certificate;
 
-# class attributes:
-# - _cert_handle
+# instance attributes:
+# --------------------
+# _cert_handle
+#
 
 @X509_Certificate::ISA = ();
 

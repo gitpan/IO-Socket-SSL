@@ -1,4 +1,16 @@
 
+v0.81
+	- calling context_init twice destroyed global context. fix from
+	  Jason Heiss <jheiss@ofb.net>.
+	- file handle tying interface implementation moved to a separate
+	  class to prevent problems resulting from self-tying filehandles.
+	  Harmon S. Nine <hnine@netarx.com>.
+	- docs/debugging.txt file added
+	- require Net::SSLeay v1.08
+	- preliminary support for non-blocking read/write
+	- socketToSSL() now respects context's SSL verify setting
+	  reported by Uri Guttman <uri@stemsystems.com>.
+
 v0.80	20010819
 	- fixed startTLS support (socketToSSL) (Graham Barr <gbarr@pobox.com>)
 	- make accept() set fileno attribute on newly created IO::Socket::SSL

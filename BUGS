@@ -1,4 +1,8 @@
 
+- 0.81 bugs, 'make test':
+	+ perl v5.005_03: t/fh-test...........untie attempted while 1 inner references still exist at blib/lib/IO/Socket/SSL.pm line 470.
+	+ perl v5.6.1: t/fh-test...........untie attempted while 1 inner references still exist at blib/lib/IO/Socket/SSL.pm line 470.
+
 - IO::Socket::SSL::close(). the following lines have been commented out
   because of problems with self-tied filehandles:
 	#my $prev = untie(*$self);

@@ -13,6 +13,7 @@ certs/server-key.pem
 t/test1.t
 t/fh-test.t
 t/lwptest.t
+t/CtxTest.t
 demo/ssl_server.pl
 demo/ssl_client.pl
 demo/daemon.pl
@@ -28,3 +29,4 @@ docs/ClassDiagram-HTTP.jpg
 docs/ClassDiagram-LWP.jpg
 docs/ClassDiagram-io-socket-ssl.jpg
 docs/ClassDiagram-utils.jpg
+docs/debugging.txt

@@ -1,8 +1,11 @@
 
 here's a list of TODO items in no particular order:
 
-- integrate diffs/libwww-perl/HTTP_Daemon.pm.diff patch to the current
-  LWP version so that it can be included in the distribution
+- support for multiple SSL contexts
+
+- proper connection termination (Net::SSLeay & SSL_shutdown())
+
+- non-blocking I/O
 
 - check that SSL sessions get reused on server side. enable session reuse
   also on client.
@@ -13,6 +16,7 @@ here's a list of TODO items in no particular order:
 	- SSL options (SSL_set_options)
 	- SSL version
 
-- X.509 certificate verification callbacks
+- integrate diffs/libwww-perl/HTTP_Daemon.pm.diff patch to the current
+  LWP version so that it can be included in the distribution
 
-- non-blocking I/O
+- X.509 certificate verification callbacks
