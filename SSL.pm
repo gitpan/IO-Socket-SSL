@@ -20,7 +20,7 @@ use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.901';
+    $VERSION = '0.91';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -163,18 +163,18 @@ sub accept_SSL {
 }
 
 
-sub read {
-    my ($self, undef, $length, $offset) = @_;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
-    my $ssl = ${*$self}{'_SSL_object'};
+####### I/O subroutines ########################
+sub generic_read {
+    my ($self, $read_func, undef, $length, $offset) = @_;
+    my $ssl = $self->get_ssl_object || return;
 
-    my $data = &Net::SSLeay::read($ssl, $length);
+    my $data = $read_func->($ssl, $length);
     return $self->error("SSL read error") unless (defined $data);
 
-    my $buffer=\$_[1];
+    my $buffer=\$_[2];
     $length = length($data);
-    $$buffer||='';
-    $offset||=0;
+    $$buffer ||= '';
+    $offset ||= 0;
     if ($offset>length($$buffer)) {
 	$$buffer.="\0" x ($offset-length($$buffer));  #mimic behavior of read
     }
@@ -183,9 +183,24 @@ sub read {
     return $length;
 }
 
+sub read { 
+    my $self = shift;
+    return $self->generic_read(\&Net::SSLeay::read, @_);
+}
+
+sub peek { 
+    my $self = shift;
+    if ($Net::SSLeay::VERSION >= 1.19 && &Net::SSLeay::OPENSSL_VERSION_NUMBER >= 0x0090601f) {
+	return $self->generic_read(\&Net::SSLeay::peek, @_);
+    } else {
+	return $self->error("SSL_peek not supported for Net::SSLeay < v1.19 or OpenSSL < 0.9.6a");
+    }
+}
+
 sub write {
     my ($self, undef, $length, $offset) = @_;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
+    my $ssl = $self->get_ssl_object || return;
+
     my $buffer = \$_[1];
     my $buf_len = length($$buffer);
     $length ||= $buf_len;
@@ -193,7 +208,6 @@ sub write {
     return $self->error("Invalid offset for SSL write") if ($offset>$buf_len);
     return 0 if ($offset==$buf_len);
 
-    my $ssl = ${*$self}{'_SSL_object'};
 
     my $written = &Net::SSLeay::ssl_write_all
 	($ssl, \substr($$buffer, $offset+$[, $length));
@@ -204,8 +218,7 @@ sub write {
 
 sub print {
     my $self = shift;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
-    my $ssl  = ${*$self}{'_SSL_object'};
+    my $ssl = $self->get_ssl_object || return;
 
     unless ($\ or $,) {
 	foreach my $msg (@_) {
@@ -235,8 +248,8 @@ sub getc {
 
 sub readline {
     my $self = shift;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
-    my $ssl = ${*$self}{'_SSL_object'};
+    my $ssl = $self->get_ssl_object || return;
+
     if (wantarray) {
 	return split (/^/, Net::SSLeay::ssl_read_all($ssl));
     }
@@ -276,12 +289,25 @@ sub close {
 
 sub fileno {
     my $self = shift;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
+    return unless($self->get_ssl_object);
     return ${*$self}{'_SSL_fileno'} || $self->SUPER::fileno();
 }
 
 
-####### IO::Socket::SSL specific functions ####### 
+####### IO::Socket::SSL specific functions #######
+sub get_ssl_object {
+    my $self = shift;
+    my $ssl = ${*$self}{'_SSL_object'};
+    return IO::Socket::SSL->error("Undefined SSL object") unless($ssl);
+    return $ssl;
+}
+
+sub pending {
+    my $ssl = shift()->get_ssl_object || return;
+    return &Net::SSLeay::pending($ssl);
+}
+
+
 sub socket_to_SSL {
     my $socket = shift;
     return IO::Socket::SSL->error("Not a socket") unless(ref($socket));
@@ -290,6 +316,7 @@ sub socket_to_SSL {
     bless $socket, "IO::Socket::SSL";
     $socket->configure_SSL($arg_hash) || return undef;
 
+    my $ssl = $socket->get_ssl_object;
     $arg_hash = ${*$socket}{'_SSL_arguments'};
 
     return $arg_hash->{'SSL_server'} ?
@@ -298,16 +325,14 @@ sub socket_to_SSL {
 }
 
 sub dump_peer_certificate {
-    my $self = shift;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
-    return &Net::SSLeay::dump_peer_certificate(${*$self}{'_SSL_object'});
+    my $ssl = shift()->get_ssl_object || return;
+    return &Net::SSLeay::dump_peer_certificate($ssl);
 }
 
 sub peer_certificate {
     my ($self, $field) = @_;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
+    my $ssl = $self->get_ssl_object || return;
 
-    my $ssl = ${*$self}{'_SSL_object'};
     my $cert = ${*$self}{'_SSL_certificate'} ||= &Net::SSLeay::get_peer_certificate($ssl) ||
 	return $self->error("Could not retrieve peer certificate");
 
@@ -320,9 +345,8 @@ sub peer_certificate {
 }
 
 sub get_cipher {
-    my $self = shift;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
-    return &Net::SSLeay::get_cipher(${*$self}{'_SSL_object'});
+    my $ssl = shift()->get_ssl_object || return;
+    return &Net::SSLeay::get_cipher($ssl);
 }
 
 sub errstr {
@@ -382,7 +406,6 @@ sub context_init {
 
 sub opened {
     my $self = shift;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
     return (${*$self}{'_SSL_opened'});
 }
 
@@ -671,6 +694,21 @@ you close it, set this option to a true value.
 
 =back
 
+=item B<peek()>
+
+This function has exactly the same syntax as sysread(), and performs nearly the same
+task (reading data from the socket) but will not advance the read position so
+that successive calls to peek() with the same arguments will return the same results.
+This function requires Net::SSLeay v1.19 or higher and OpenSSL 0.9.6a or later to work.
+
+
+=item B<pending()>
+
+This function will let you know how many bytes of data are immediately ready for reading
+from the socket.  This is especially handy if you are doing reads on a blocking socket
+or just want to know if new data has been sent over the socket.
+
+
 =item B<get_cipher()>
 
 Returns the string form of the cipher that the IO::Socket::SSL object is using.
@@ -781,7 +819,7 @@ next day on CPAN. Otherwise, it could take weeks . . .
 
 IO::Socket::SSL uses Net::SSLeay as the shiny interface to OpenSSL, which is
 the shiny interface to the ugliness of SSL.  As a result, you will need both Net::SSLeay
-(1.19 recommended) and OpenSSL (0.9.6g recommended) on your computer before
+(1.20 recommended) and OpenSSL (0.9.6g recommended) on your computer before
 using this module.
 
 =head1 DEPRECATIONS
@@ -832,11 +870,13 @@ IO::Socket::INET, Net::SSLeay.
 
 =head1 AUTHORS
 
-Peter Behroozi, behroozi@www.pls.uni.edu
+Peter Behroozi, behroozi@www.pls.uni.edu.
 
 Marko Asplund, aspa@kronodoc.fi, was the original author of IO::Socket::SSL.
 
 =head1 COPYRIGHT
+
+The rewrite of this module is Copyright (C) 2002 Peter Behroozi.
 
 This module is Copyright (C) 1999-2002 Marko Asplund.
 

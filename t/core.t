@@ -8,6 +8,10 @@ eval {require "t/ssl_settings.req";} ||
 eval {require "ssl_settings.req";};
 
 $GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS = eval "use 5.006; return 1";
+$NET_SSLEAY_VERSION = $Net::SSLeay::VERSION;
+$OPENSSL_VERSION = 0;
+$OPENSSL_VERSION = &Net::SSLeay::OPENSSL_VERSION_NUMBER if ($NET_SSLEAY_VERSION>=1.19);
+$CAN_PEEK = ($OPENSSL_VERSION >= 0x0090601f) ? 1 : 0;
 
 $numtests = 25;
 $|=1;
@@ -21,6 +25,11 @@ foreach ($^O) {
 
 if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     $numtests++;
+}
+
+#We can only test SSL_peek if OpenSSL is v0.9.6a or better
+if ($CAN_PEEK) {
+    $numtests+=3;
 }
 
 print "1..$numtests\n";
@@ -61,8 +70,15 @@ unless (fork) {
     $client->get_cipher() || print "not ";
     &ok("client");
 
-
     $client->syswrite('00waaaanf00', 7, 2);
+
+    if ($CAN_PEEK) {
+	my $buffer;
+	$client->read($buffer,2);
+	print "not " if ($buffer ne 'ok');
+	&ok("client");
+    }
+
     $client->print("Test\n");
     $client->printf("\$%.2f\n%d\n%c\n%s", 1.0444442342, 4.0, ord("y"), "Test\nBeaver\nBeaver\n");
     shutdown($client, 1);
@@ -156,6 +172,22 @@ fileno($client) || print "not ";
 &ok("server");
 
 my $buffer;
+
+if ($CAN_PEEK) {
+    $client->peek($buffer, 7, 2);
+    print "not " if ($buffer ne "\0\0waaaanf");
+    &ok("server");
+
+    print "not " if ($client->pending() != 7);
+    &ok("server");
+
+    print $client "ok";
+}
+
+
+
+
+
 sysread($client, $buffer, 7, 2);
 print "not " if ($buffer ne "\0\0waaaanf");
 &ok("server");
