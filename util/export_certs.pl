@@ -2,7 +2,7 @@
 # a script for exporting Netscape navigator's certificate database
 # (aspa@hip.fi).
 #
-# $Id: export_certs.pl,v 1.2 1999/05/28 15:33:50 aspa Exp aspa $.
+# $Id: export_certs.pl,v 1.1 2000/08/08 06:37:56 aspa Exp $.
 #
 # additional information:
 # - http://www.drh-consultancy.demon.co.uk/cert7.html

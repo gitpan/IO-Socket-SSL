@@ -1,4 +1,10 @@
 
+v0.75	20000726
+	- IO::Socket::SSL should now work with perl v5.6.0
+	- demo/*.pl and t/*.t now turn module debugging on if
+	  DEBUG command line argument is given
+	- default certificates changed
+
 v0.74	20000705
 	- Changes file added
 	- bugfix in IO::Socket::SSL::sysread() (zliu2@acsu.buffalo.edu)

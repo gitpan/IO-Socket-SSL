@@ -1,7 +1,7 @@
 #
 # test HTTP::Daemon with IO::Socket::SSL (aspa@hip.fi).
 #
-# $Id: daemon.pl,v 1.4 1999/06/18 13:27:24 aspa Exp $.
+# $Id: daemon.pl,v 1.2 2000/08/08 06:35:59 aspa Exp $.
 #
 
 # NB: to use this demo script HTTP::Daemon and
@@ -14,14 +14,16 @@ use HTTP::Status;
 use IO::Socket::SSL;
 
 
+my $debug = $ARGV[0] || "";
+if($debug eq "DEBUG") { $IO::Socket::SSL::DEBUG = 1; }
+
+
 $r = IO::Socket::SSL::context_init({
 				    SSL_verify_mode => 0x00,
 				    SSL_server => 1,
 			   });
-$IO::Socket::SSL::DEBUG=1;
 
-
-my $d = new HTTP::Daemon;
+my $d = HTTP::Daemon->new(UseSSL => 1);
 print "Please contact me at: <URL:", $d->url, ">\n";
 while (my $c = $d->accept) {
   while (my $r = $c->get_request) {

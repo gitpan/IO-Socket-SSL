@@ -1,7 +1,7 @@
 #
 # a MakeMaker script for IO::Socket::SSL (aspa@hip.fi).
 #
-# $Id: Makefile.PL,v 1.1 2000/07/04 10:09:57 aspa Exp aspa $.
+# $Id: Makefile.PL,v 1.1 2000/07/04 10:09:57 aspa Exp $.
 #
 
 use 5.00503; # prior versions have problems with self-ties.

@@ -1,13 +1,15 @@
 #
 # a test client for testing IO::Socket::SSL's behavior (aspa@hip.fi).
 #
-# $Id: test1.t,v 1.2 2000/07/04 11:26:14 aspa Exp $.
+# $Id: test1.t,v 1.4 2000/08/08 06:33:16 aspa Exp $.
 #
 
 use IO::Socket::SSL;
 
 my ($v_mode, $sock);
 
+my $debug = $ARGV[0] || "";
+if($debug eq "DEBUG") { $IO::Socket::SSL::DEBUG = 1; }
 
 print "1..4\n";
 
@@ -42,7 +44,8 @@ while ( ($r = $sock->read($buf, 1, $cnt)) && ($cnt < 154) ) {
 }
 if($r && $cnt) { print "ok\n"; } else { print "not ok\n"; }
 
-#print STDERR "read bytes: cnt = '$cnt'.\n'$buf'\n";
+print STDERR "read bytes: cnt = '$cnt'.\n'$buf'\n"
+  if($IO::Socket::SSL::DEBUG);
 
 # read the rest of the input.
 while ( ($r = $sock->read($buf, 1, $cnt)) ) {
@@ -50,7 +53,8 @@ while ( ($r = $sock->read($buf, 1, $cnt)) ) {
 }
 if(!$r && $cnt) { print "ok\n"; } else { print "not ok\n"; }
 
-#print STDERR "'$buf'\n";
+print STDERR "'$buf'\n"
+  if($IO::Socket::SSL::DEBUG);
 
 $sock->close;
 

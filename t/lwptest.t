@@ -2,10 +2,11 @@
 # a test client for testing IO::Socket::SSL-class's behavior
 # together with LWP (aspa@hip.fi).
 #
-# $Id: lwptest.t,v 1.1 2000/07/04 10:15:32 aspa Exp $.
+# $Id: lwptest.t,v 1.4 2000/08/08 06:32:50 aspa Exp $.
 #
 
 use strict;
+use IO::Socket::SSL;
 
 BEGIN {
   my $r = eval 'require LWP::UserAgent';
@@ -20,17 +21,18 @@ BEGIN {
 
 my ($rq1, $rq2, $rq3, $rq4, $res, @res);
 
+my $debug = $ARGV[0] || "";
+if($debug eq "DEBUG") { $IO::Socket::SSL::DEBUG = 1; }
+
 my $ua = new LWP::UserAgent;
 
 # NB: we can't pass SSL options to IO::Socket::SSL through LWP but we
 # can explicitly create and set the SSL context with specific
 # options for IO::Socket::SSL.
-use IO::Socket::SSL;
 # create and initialize the SSL context.
 my $r = IO::Socket::SSL::context_init({
 				       SSL_verify_mode => 0x01,
 				      });
-#$IO::Socket::SSL::DEBUG = 1;
 
 # CA cert filenames can be generated with:
 # 'ssleay x509 -hash < ca-cert.pem'
@@ -48,8 +50,10 @@ print "1..3\n";
 if($rq1) {
   $res = $ua->request($rq1);
   if($res->is_success) {
-    #print STDERR "request 1: success.\n";
-    #print STDERR "" . $res->headers->as_string() . "\n";
+    if ($IO::Socket::SSL::DEBUG) {
+      print STDERR "request 1: success.\n";
+      print STDERR "" . $res->headers->as_string() . "\n";
+    }
     print "ok\n";
   } else {
     print STDERR "request 1: failed: '" . $res->message . "'.\n";

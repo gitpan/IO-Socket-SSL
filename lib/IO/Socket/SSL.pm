@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.2 2000/07/04 11:24:02 aspa Exp $.
+# $Id: SSL.pm,v 1.14 2000/07/26 06:31:11 aspa Exp aspa $.
 #
 
 #
@@ -34,6 +34,7 @@
 
 package IO::Socket::SSL;
 
+use 5.005;
 use strict;
 use Carp;
 use English;
@@ -43,7 +44,7 @@ use Net::SSLeay;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.74';
+$IO::Socket::SSL::VERSION = '0.75';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -120,7 +121,9 @@ sub new {
   if( !($self = $class->SUPER::new(@_)) ) {
     return undef;
   }
-  
+  ${*$self}{'_fileno'} = fileno($self);
+
+  bless $self, "IO::Socket::SSL";
   my $tiedhandle = tie *{$self}, "IO::Socket::SSL", $self;
 
   return $tiedhandle;
@@ -187,11 +190,11 @@ sub connect {
 
   # create the SSL object.
   if( ! ($ssl_obj = SSL_SSL->new($s, $args)) ) {
-    return $ssl_obj;
+    return undef;
   }
   ${*$s}{'_SSL_SSL_obj'} = $ssl_obj;
 
-  my $ssl = $ssl_obj->get_ssl_handle;
+  my $ssl = $ssl_obj->get_ssl_handle();
   if ( ($r = Net::SSLeay::connect($ssl)) <= 0 ) { # ssl/s23_clnt.c
     my $err_str = $self->_get_SSL_err_str();    
     return $self->_myerror("SSL_connect: '$err_str'.");
@@ -206,31 +209,34 @@ sub connect {
 #
 sub accept {
   my $self = shift;
-  my ($ns, $r, $ssl_obj);
+  my ($newsock, $r, $ssl_obj);
 
   my $args = ${*$self}{'_arguments'};
 
-  if( ! ($ns = $self->SUPER::accept(@_)) ) {
+  if( ! ($newsock = IO::Socket::accept($self, 'IO::Socket::INET')) ) {
     return $self->_myerror("accept failed: '$!'.\n");
   }
+  my $fileno = fileno($newsock);
 
   # create the SSL object.
-  if( ! ($ssl_obj = SSL_SSL->new($ns, $args)) ) {
-    return $ssl_obj;
+  if( ! ($ssl_obj = SSL_SSL->new($newsock, $args)) ) {
+    return undef;
   }
-  ${*$ns}{'_SSL_SSL_obj'} = $ssl_obj;
+  ${*$newsock}{'_SSL_SSL_obj'} = $ssl_obj;
 
-  my $ssl = $ssl_obj->get_ssl_handle;
+  my $ssl = $ssl_obj->get_ssl_handle();
   if( ($r = Net::SSLeay::accept($ssl)) <= 0 ) { # ssl/s23_srvr.c
     my $err_str = $self->_get_SSL_err_str();
     return $self->_myerror("SSL_accept: '$err_str'.");
   }
 
-  #my $tiedhandle = tie *$ns, "IO::Socket::SSL";
+  # make $newsock a IO::Socket::SSL object and tie it.
+  bless $newsock, "IO::Socket::SSL";
+  my $tiedhandle = tie *{$newsock}, "IO::Socket::SSL", $newsock;
 
-  print STDERR "accept: self: $self, ns: $ns.\n"
+  print STDERR "accept: self: $self, newsock: $newsock, fileno: $fileno.\n"
     if $IO::Socket::SSL::DEBUG;
-  return $ns;
+  return $newsock;
 }
 
 
@@ -252,7 +258,7 @@ sub syswrite {
   my $offset = shift || 0;
 
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
-  my $ssl = $ssl_obj->get_ssl_handle;
+  my $ssl = $ssl_obj->get_ssl_handle();
 
   my ($res, $len, $real_len, $wbufref);
 
@@ -292,7 +298,7 @@ sub sysread {
   my $int_buf;
 
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
-  my $ssl = $ssl_obj->get_ssl_handle;
+  my $ssl = $ssl_obj->get_ssl_handle();
 
   # see Net_SSLeay-1.03/SSLeay.xs,
   # openssl-0.9.1c/ssl/ssl_lib.c and bio_ssl.c.
@@ -361,13 +367,26 @@ sub printf {
 
 
 # ***** close
+
 sub close {
   my $self = shift;
 
-  my $prev = untie(*{$self});
-
   print STDERR "close: $self.\n" if $IO::Socket::SSL::DEBUG;
-  return $self->SUPER::close();
+  # NB: the next two lines seem to result in SIGSEGV with perl v5.6.0
+  #     on my linux system.
+  #my $prev = untie(*$self);
+  #return $self->SUPER::close();
+  return 1;
+}
+
+
+# **** FILENO
+
+sub FILENO {
+  my $self = shift;
+  my $fileno = ${*$self}{'_fileno'};
+
+  return $fileno;
 }
 
 
@@ -423,7 +442,7 @@ sub get_cipher {
   my $self = shift;
 
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
-  my $ssl = $ssl_obj->get_ssl_handle;
+  my $ssl = $ssl_obj->get_ssl_handle();
 
   my $cipher_str = Net::SSLeay::get_cipher($ssl);
 
@@ -437,7 +456,7 @@ sub get_peer_certificate {
   my $self = shift;
 
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
-  my $ssl = $ssl_obj->get_ssl_handle;
+  my $ssl = $ssl_obj->get_ssl_handle();
 
   my ($cert, $cert_obj);
 
@@ -456,8 +475,10 @@ sub get_peer_certificate {
 sub DESTROY {
   my $self = shift;
 
-}
+  print STDERR "IO::Socket::SSL::DESTROY: '$self'.\n"
+      if $IO::Socket::SSL::DEBUG;
 
+}
 
 # ***** define filehandle tying interface.
 sub TIEHANDLE { return $_[1]; }
@@ -677,12 +698,16 @@ sub new {
 
   # load certificate and private key.
   if( $is_server || $use_cert ) {
+    print STDERR "loading RSA key ($key_file).\n"
+      if ($IO::Socket::SSL::DEBUG);
     if(!($r=Net::SSLeay::CTX_use_RSAPrivateKey_file($ctx,
 		 $key_file, &Net::SSLeay::FILETYPE_PEM() ))) {
       my $err_str = IO::Socket::SSL::_get_SSL_err_str();    
       return IO::Socket::SSL::_myerror("CTX_use_RSAPrivateKey_file:" .
 				       " '$err_str'.");
     }
+    print STDERR "loading cert ($cert_file).\n"
+      if ($IO::Socket::SSL::DEBUG);
     if(!($r=Net::SSLeay::CTX_use_certificate_file($ctx,
 		 $cert_file, &Net::SSLeay::FILETYPE_PEM() ))) {
       my $err_str = IO::Socket::SSL::_get_SSL_err_str();    
@@ -709,7 +734,8 @@ sub DESTROY {
 
   my $ctx = $self->get_context_handle;
 
-  print STDERR "DESTROY: '$self', '$ctx'.\n" if $IO::Socket::SSL::DEBUG;
+  print STDERR "SSL_Context::DESTROY: '$self', '$ctx'.\n"
+      if $IO::Socket::SSL::DEBUG;
 
   # this is an example of a potential race condition.
   if ($ctx && !$self->{'_CTX_freed'}) {
@@ -786,8 +812,14 @@ sub DESTROY {
 
   my $cert = $self->{'_cert_handle'};
 
+  print STDERR "X509_Certificate::DESTROY: '$self', '$cert'.\n"
+      if $IO::Socket::SSL::DEBUG;
+  
   # here we should free resources held by the the certificate.
-  X509_free($cert);
+
+  # include/openssl/x509.h: X509_free(X509 *a);
+  # NB: Net::SSLeay (v1.05) doesn't define this!
+  #Net::SSLeay::X509_free($cert);
 }
 
 
