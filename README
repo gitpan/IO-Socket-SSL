@@ -1,13 +1,17 @@
 
 IO::Socket::SSL is a class implementing an object oriented
 interface to SSL sockets. The class is a descendent of
-IO::Socket::INET and provides a subset of the base class's
-interface methods.
+IO::Socket::INET.
 
-in order to use IO::Socket::SSL you need to have Net_SSLeay
-v1.03 or newer installed.
+In order to use IO::Socket::SSL you need to have Net::SSLeay
+v1.08 or newer installed (v1.18 recommended).  In order to use
+password callbacks, Net::SSLeay v1.16 is required.
 
-in addition to providing a general OO interface to SSL sockets
+This version has been tested with a variety of Net::SSLeay
+versions (including 1.17 and 1.18), OpenSSL 0.9.6c and 0.9.6d,
+and Perl versions 5.005_03, 5.6.0, 5.6.1, and 5.8.0.
+
+In addition to providing a general OO interface to SSL sockets
 this package can be used with libwww-perl.
 
 installation:
@@ -17,4 +21,4 @@ installation:
 	make install
 
 --
-	aspa@kronodoc.fi
+(Originally by Marko Asplund, aspa@kronodoc.fi)

@@ -1,5 +1,58 @@
+v0.90
+	- This version is a complete rewrite of IO::Socket::SSL.  It now 
+	  has about half the lines of code, twice the amount of documentation, 
+	  and a slightly more polished interface.
+	- IO::Socket::SSL now works properly with mod_perl and taint mode.
+	- Major documentation update.
+	- Update of the BUGS file to reflect changes made in the rewrite.
+	- Update of the test suite for Perl v5.8.0 (or, more precisely,
+	  for Scalar::Util).
+	- Update of the test suite for Perl v5.00503 (or, more precisely,
+	  for the lack of several nice features added in v5.6.0) (Marko
+	  Asplund <aspa@kronodoc.fi>).
+	- New test suite that does not need the Internet to function.
+	- Update of all the files in example/ to use more current features
+	  of IO::Socket::SSL.
+	- Removal of SSL_SSL and X509_Certificate classes.
+	- There have been a few name changes (like socketToSSL ->
+	  socket_to_SSL) for better consistency.
+	- The functionality of get_peer_certificate() and friends is deprecated.
+	- The functionality of want_write() and want_read() is deprecated.
+	- The functionality of context_init() is deprecated for normal use.
+	- Support for all SSL context options in the new() call.
+	- SSL contexts are no longer global.  The SSL_reuse_ctx option
+	  is provided for those who want to re-use a context.
+	- The default verify mode is now VERIFY_NONE.
+	- IO::Socket::SSL::DEBUG is now linked to Net::SSLeay::trace to
+	  provide different levels of debugging information.
+	- There is a uniform interface for error reporting, so on error
+	  all functions will return undef and the error will be available
+	  by calling errstr().
+	- The dump_peer_certificate() and peer_certificate() functions
+	  have been added.
+	- sysread() will now behave correctly if the offset argument is
+	  greater than the length of the read buffer.  It also will truncate
+	  the read buffer properly, according to the Perl documentation for
+	  sysread(), and account for $[.
+	- getline(), getlines(), and getc() have been added.
+	- syswrite() now uses references to avoid copying large amounts of data,
+	  and will behave like Perl's syswrite even if you mess with $[ (but
+	  don't do that).
+	- readline() uses ssl_read_all in array context for improved speed.
+	- close() now uses SSL_shutdown() to properly close an SSL connection,
+	  unless you tell it not to.
+	- If you have Net::SSLeay version 1.18 or greater, X509 certificates
+	  will be properly freed.
+	- All other known bugs have been fixed.
 
-v0.81
+
+--- Old Versions --------------------------------------------------
+
+v0.81a (Not publically released)
+	- Added support for SSL_passwd_cb.
+	- Added accept() server socket support to socketToSSL().
+
+v0.81   20020410
 	- calling context_init twice destroyed global context. fix from
 	  Jason Heiss <jheiss@ofb.net>.
 	- file handle tying interface implementation moved to a separate

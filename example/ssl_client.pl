@@ -19,29 +19,25 @@ if(!($sock = IO::Socket::SSL->new( PeerAddr => 'localhost',
 				   Proto    => 'tcp',
 				   SSL_use_cert => 1,
 				   SSL_verify_mode => 0x01,
+				   SSL_passwd_cb => sub { return "opossum" },
 				 ))) {
-  print STDERR "unable to create socket: '$!'.\n";
-  exit(0);
+    warn "unable to create socket: ", &IO::Socket::SSL::errstr, "\n";
+    exit(0);
 } else {
-  print STDERR "connect ($sock).\n" if ($IO::Socket::SSL::DEBUG);
+    warn "connect ($sock).\n" if ($IO::Socket::SSL::DEBUG);
 }
 
 # check server cert.
-my ($peer_cert, $subject_name, $issuer_name, $cipher);
+my ($subject_name, $issuer_name, $cipher);
 if( ref($sock) eq "IO::Socket::SSL") {
-    if(($peer_cert = $sock->get_peer_certificate)) {
-	$subject_name = $peer_cert->subject_name;
-	$issuer_name = $peer_cert->issuer_name;
-	$cipher = $sock->get_cipher();
-    }
-    print STDERR "cipher: $cipher.\n";
-    print STDERR "server cert:\n". 
-	"\t '$subject_name' \n\t '$issuer_name'.\n\n";
+    $subject_name = $sock->peer_certificate("subject");
+    $issuer_name = $sock->peer_certificate("issuer");
+    $cipher = $sock->get_cipher();
 }
+warn "cipher: $cipher.\n", "server cert:\n", 
+    "\t '$subject_name' \n\t '$issuer_name'.\n\n";
 
-$buf = "";
-
-$sock->sysread($buf, 32768);
+my ($buf) = $sock->getlines;
 
 $sock->close();
 

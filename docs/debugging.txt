@@ -7,9 +7,7 @@
 - run the tests in IO::Socket::SSL directory
   try running the tests with 'make test'. if some of the tests fail run
   the scripts one by one e.g.:
-  perl -Ilib t/fh-test.t
-  for the tests that fail add the 'DEBUG' command line argument to the end
-  of the command line for more verbose error messages.
+  perl -Ilib t/core.t
 
 - try running the demos using the DEBUG option
 
