@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.19 1999/06/18 14:48:05 aspa Exp $.
+# $Id: SSL_NetSSLeay.pm,v 1.2 1999/07/21 19:24:12 aspa Exp $.
 #
 
 #
@@ -39,7 +39,7 @@ use IO::Socket;
 use Net::SSLeay;
 use English;
 
-$IO::Socket::SSL::VERSION = '0.70';
+$IO::Socket::SSL::VERSION = '0.72';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -76,6 +76,7 @@ my $DEFAULT_CIPHER_LIST = "ALL:!LOW:!EXP";
 # - SSL_Context_obj
 # - DEBUG
 # - _SSL_SSL_obj
+# - _arguments
 #
 # private methods:
 # ----------------
@@ -113,7 +114,7 @@ sub new {
     return undef;
   }
   
-  my $tiedhandle = tie *$self, "IO::Socket::SSL", $self;
+  my $tiedhandle = tie *{$self}, "IO::Socket::SSL", $self;
 
   return $tiedhandle;
 }
@@ -184,7 +185,7 @@ sub connect {
   ${*$s}{'_SSL_SSL_obj'} = $ssl_obj;
 
   my $ssl = $ssl_obj->get_ssl_handle;
-  if ( ($r = Net::SSLeay::connect($ssl)) < 0 ) {
+  if ( ($r = Net::SSLeay::connect($ssl)) <= 0 ) { # ssl/s23_clnt.c
     my $err_str = $self->_get_SSL_err_str();    
     return $self->_myerror("SSL_connect: '$err_str'.");
   }
@@ -213,7 +214,7 @@ sub accept {
   ${*$ns}{'_SSL_SSL_obj'} = $ssl_obj;
 
   my $ssl = $ssl_obj->get_ssl_handle;
-  if( ($r = Net::SSLeay::accept($ssl)) < 0 ) {
+  if( ($r = Net::SSLeay::accept($ssl)) <= 0 ) { # ssl/s23_srvr.c
     my $err_str = $self->_get_SSL_err_str();
     return $self->_myerror("SSL_accept: '$err_str'.");
   }
@@ -246,14 +247,14 @@ sub syswrite {
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
   my $ssl = $ssl_obj->get_ssl_handle;
 
-  my ($res, $len, $real_len, $wbuf);
+  my ($res, $len, $real_len, $wbufref);
 
 
   # obtain a buffer ref to write buffer.
-  $wbuf = \substr("$buf", $offset, $arg_len);
+  $wbufref = \substr("$buf", $offset, $arg_len);
 
   # argument length is not allowed to be greater than buffer length.
-  if( $arg_len > ($real_len = length($$wbuf)) ) {
+  if( $arg_len > ($real_len = length($$wbufref)) ) {
     $len = $real_len;
   } else {
     $len = $arg_len; 
@@ -261,7 +262,7 @@ sub syswrite {
   
   # see Net_SSLeay-1.03/SSLeay.xs,
   # openssl-0.9.1c/ssl/ssl_lib.c and bio_ssl.c.
-  if( ($res = Net::SSLeay::write($ssl, $$wbuf)) < 0 ) {
+  if( ($res = Net::SSLeay::write($ssl, $$wbufref)) < 0 ) {
     my $err_str = $self->_get_SSL_err_str();
     return $self->_myerror("SSL_write: '$err_str'.");
   }
@@ -292,31 +293,35 @@ sub sysread {
     my $err_str = $self->_get_SSL_err_str();
     return $self->_myerror("SSL_read: '$err_str'.");
   }
-  my $rlen = length($int_buf);
+  my $read_len = length($int_buf);
 
-  # EOF handling.
-  if( ($rlen < $max_len) || ($rlen == 0) ) {
+  # EOF handling: we've had an EOF if the number of bytes read
+  # is _fewer_ than were requested.
+  if( ($read_len < $max_len) || ($read_len == 0) ) {
     if( ! ${*$self}{'_EOF'} ) {
       ${*$self}{'_EOF'} = 1;
     } else {
-      # N.B.: sysread semantics require that the buffer
+      # N.B.: perl sysread semantics require that the buffer
       # is set to "" when read past EOF.
       $_[1] = "$int_buf";
     }
-    if ($rlen == 0) { return 0; }
+    if ($read_len == 0) { return 0; }
   }
 
-  my $blen = length($_[1]);
-  my $index = ($offset >= 0) ? $offset : $blen + $offset;
+  if(!defined($_[1])) { $_[1] = ""; } # initialize uninitialized buffer.
+  my $buffer_len = length($_[1]);
+  my $start = ($offset >= 0) ? $offset : $buffer_len + $offset;
+  my $elen = (($start + $read_len) > $buffer_len) ?
+    $buffer_len - $start : $read_len;
 
   # IO::Scalar might be handy with buffer handling.
-  if ( ($index >= 0) && ($index <= $blen) ) {
-    substr($_[1], $offset, $rlen) = "$int_buf";
+  if ( ($start >= 0) && ($start <= $buffer_len) ) {
+    substr($_[1], $start, $elen) = "$int_buf";
   } else {
     croak '$fh->sysread(): offset outside of buffer.';
   }
 
-  return $rlen;
+  return $read_len;
 }
 
 
@@ -357,7 +362,7 @@ sub printf {
 sub close {
   my $self = shift;
 
-  my $prev = untie(*$self);
+  my $prev = untie(*{$self});
 
   print STDERR "close: $self.\n" if $IO::Socket::SSL::DEBUG;
   return $self->SUPER::close();
@@ -388,9 +393,9 @@ sub get_cipher {
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
   my $ssl = $ssl_obj->get_ssl_handle;
 
-  my $cipher = Net::SSLeay::get_cipher($ssl);
+  my $cipher_str = Net::SSLeay::get_cipher($ssl);
 
-  return $cipher;
+  return $cipher_str;
 }
 
 
@@ -409,7 +414,7 @@ sub get_peer_certificate {
     return $self->_myerror("get_peer_certificate: '$err_str'.");    
   }
 
-  $cert_obj = Certificate->new();
+  $cert_obj = X509_Certificate->new();
   $cert_obj->{'_cert_handle'} = $cert;
 
   return $cert_obj;
@@ -530,7 +535,8 @@ sub new {
   if (defined $verify_mode) {
     &Net::SSLeay::set_verify($ssl, $verify_mode, 0);
   }
-  # see: http://www.modssl.org/docs/2.3/ssl_reference.html#ToC9
+  # see: bin/openssl ciphers -v,
+  #      http://www.modssl.org/docs/2.3/ssl_reference.html#ToC9
   &Net::SSLeay::set_cipher_list($ssl, $cipher_list);
   
   if( ! ($r = Net::SSLeay::set_fd($ssl, $s->fileno)) ) {
@@ -619,7 +625,7 @@ sub new {
     my $err_str = $self->_get_SSL_err_str();
     return IO::Socket::SSL::_myerror("CTX_new(): '$err_str'.");
   }
-  
+
   # set options for the context.
   $r = Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL() );
 
@@ -672,11 +678,13 @@ sub DESTROY {
 
   my $ctx = $self->get_context_handle;
 
-  print STDERR "DESTROY: $self.\n" if $IO::Socket::SSL::DEBUG;
+  print STDERR "DESTROY: '$self', '$ctx'.\n" if $IO::Socket::SSL::DEBUG;
 
-  if ($ctx) {
+  # this is an example of a potential race condition.
+  if ($ctx && !$self->{'_CTX_freed'}) {
     # should release all SSL_CTX-struct related resources.
     Net::SSLeay::CTX_free($ctx);
+    $self->{'_CTX_freed'} = 1;
   }
 
   # IO::Socket::SSL specific.
@@ -689,7 +697,7 @@ sub DESTROY {
 1;
 
 #
-# ******************** Certificate class ********************
+# ******************** X509_Certificate class ********************
 #
 
 #
@@ -697,12 +705,12 @@ sub DESTROY {
 # needed by libwww-perl (LWP::Protocol::https).
 #
 
-package Certificate;
+package X509_Certificate;
 
 # class attributes:
 # - _cert_handle
 
-@Certificate::ISA = ();
+@X509_Certificate::ISA = ();
 
 sub new {
   bless {};
@@ -887,7 +895,7 @@ Get a string representation of the used cipher.
 
 =head2 get_peer_certificate
 
-Obtain a reference to the Certificate object representing
+Obtain a reference to the X509_Certificate object representing
 peer's certificate.
 
 =head1 RELATED CLASSES
@@ -929,7 +937,7 @@ Encapsulates per connection SSL options.
 
 
 
-=head2 Certificate
+=head2 X509_Certificate
 
 Encapsulates X509 certificate information.
 

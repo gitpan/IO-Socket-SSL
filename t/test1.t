@@ -1,7 +1,7 @@
 #
 # a test client for testing IO::Socket::SSL's behavior (aspa@hip.fi).
 #
-# $Id: test1.t,v 1.4 1999/06/18 13:40:11 aspa Exp $.
+# $Id: test1.t,v 1.4 1999/06/18 13:40:11 aspa Exp aspa $.
 #
 
 use IO::Socket::SSL;

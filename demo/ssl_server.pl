@@ -2,7 +2,7 @@
 # a test server for testing IO::Socket::SSL-class's behavior
 # (aspa@hip.fi).
 #
-# $Id: ssl_server.pl,v 1.6 1999/06/18 13:31:07 aspa Exp $.
+# $Id: ssl_server.pl,v 1.6 1999/06/18 13:31:07 aspa Exp aspa $.
 #
 
 use strict;

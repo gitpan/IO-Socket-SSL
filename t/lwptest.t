@@ -2,7 +2,7 @@
 # a test client for testing IO::Socket::SSL-class's behavior
 # together with LWP (aspa@hip.fi).
 #
-# $Id: lwptest.t,v 1.6 1999/06/18 13:42:49 aspa Exp $.
+# $Id: lwptest.t,v 1.6 1999/06/18 13:42:49 aspa Exp aspa $.
 #
 
 use strict;
