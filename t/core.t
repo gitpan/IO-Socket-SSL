@@ -13,7 +13,7 @@ $OPENSSL_VERSION = 0;
 $OPENSSL_VERSION = &Net::SSLeay::OPENSSL_VERSION_NUMBER if ($NET_SSLEAY_VERSION>=1.19);
 $CAN_PEEK = ($OPENSSL_VERSION >= 0x0090601f) ? 1 : 0;
 
-$numtests = 29;
+$numtests = 32;
 $|=1;
 
 foreach ($^O) {
@@ -104,6 +104,7 @@ unless (fork) {
     }
 
     $client->print("Test\n");
+    send($client, "Test\n", 0);
     $client->printf("\$%.2f\n%d\n%c\n%s", 1.0444442342, 4.0, ord("y"), "Test\nBeaver\nBeaver\n");
     shutdown($client, 1);
 
@@ -243,6 +244,10 @@ print "not "  if ($array[0] ne "Test\n");
 &ok("server");
 
 
+recv($client, my $recv_buffer, 5, 0);
+print "not " if ($recv_buffer ne "Test\n");
+&ok("server");
+
 print "not " if (getc($client) ne "\$");
 &ok("server");
 
@@ -269,6 +274,8 @@ printf $client "\$%.2f\n%d\n%c\n%s", (1.0444442342, 4.0, ord("y"), "Test\nBeaver
 
 close $client;
 
+print "Hooray!\n";
+
 $client = $server->accept || &bail;
 
 if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
@@ -277,9 +284,19 @@ if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     print "not " if ($client->errstr() !~ /wants a read/);
     &ok("server");
 }
+
+print "not " unless ($client->opened);
+&ok("server");
+
 print $client "Boojums\n";
 
 close($client);
+
+${*$client}{'_SSL_opened'} = 1;
+print "not " if ($client->opened);
+&ok("server");
+${*$client}{'_SSL_opened'} = 0;
+
 
 $server->close(SSL_ctx_free => 1);
 wait;

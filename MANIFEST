@@ -21,3 +21,4 @@ t/compatibility.t
 t/core.t
 t/ssl_settings.req
 util/export_certs.pl
+META.yml

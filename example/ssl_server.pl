@@ -13,6 +13,15 @@ my ($sock, $s, $v_mode);
 
 if($ARGV[0] eq "DEBUG") { $IO::Socket::SSL::DEBUG = 1; }
 
+# Check to make sure that we were not accidentally run in the wrong
+# directory:
+unless (-d "certs") {
+    if (-d "../certs") {
+	chdir "..";
+    } else {
+	die "Please run this example from the IO::Socket::SSL distribution directory!\n";
+    }
+}
 
 if(!($sock = IO::Socket::SSL->new( Listen => 5,
 				   LocalAddr => 'localhost',

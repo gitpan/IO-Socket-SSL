@@ -1,12 +1,29 @@
-v0.94
-	- Changed accept() to use inherited accept() instead of 
+v0.95
+	- Changed PeerAddr in example/ssl_client.pl back to localhost.
+	- Update of examples to automatically switch to the proper
+	  directory if they cannot find the necessary SSL certificates.
+	- Minor documentation update with more INET6 info.
+	- Corrected some error messages for IO::Socket::INET6.
+	- Better opened() behavior when sockets close unexpectedly.
+	- Added note about random number generators for Solaris users
+	  (Problem found by Christian Gilmore <cag at us.ibm.com>).
+	- Added support for WeakRef and Scalar::Util to allow
+	  IO::Socket::SSL objects to auto-destroy themselves when 
+	  they go out of scope.
+	- Added croak()ing for unimplemented send() and recv() methods
+	  so they are not accidentally used to transmit unencrypted
+	  data.  The Perl builtin functions cannot be reliably trapped
+	  and are still dangerous, a fact that the POD now reflects
+	  (Problem noted by Michal Ludvig <michal at logix.cx>).
+
+--- Old Versions --------------------------------------------------
+
+v0.94  2003.6.26
+	- Changed accept() to use inherited accept() instead of
 	  IO::Socket::accept, so that IPv6 inheritance is possible.
 	- Added options to import() so that a user could specify
 	  IPv6 or IPv4 mode of operation.
 	- Documentation fixes, esp. e-mail address.
-
-
---- Old Versions --------------------------------------------------
 
 v0.93  2003.6.24
 	- Fixed error-checking slip in connect_SSL() (Problem found by
@@ -18,14 +35,15 @@ v0.93  2003.6.24
 	  in all cases, undef arguments may be set to '' without any
 	  change in behavior except for removing the warnings.
 	  (Problem found by Dominique Quatravaux <dom at idealx.com>)
-	- If accept() or connect() fails in SSL negotiation, the user 
+	- If accept() or connect() fails in SSL negotiation, the user
 	  now has the option to print something to the failed socket
 	  before it is closed.  (error_trap option in new())
 	- Added support for CRLs (SSL_check_crl option in new()) for
 	  versions of OpenSSL >= 0.9.7b (Original patch from
 	  Brian Lindauer <jbl at sysd.com>)
 	- Finally added decent support for certificate callbacks.
-	  (SSL_verify_callback option in new()).
+	  (SSL_verify_callback option in new(), suggestion from
+	  Dariush Pietrzak <eyck at ghost.anime.pl>).
 	- accept()/connect()/socket_to_SSL() now fail immediately if
 	  the socket in question does not have a fileno.
 	- Added the kill_socket() method to guarantee that a socket dies.
@@ -40,7 +58,8 @@ v0.93  2003.6.24
 	  if SSL negotiation failed (Request from Graham Barr
 	  <gbarr at pobox.com>)
 	- Removed the daemon.pl example, as it did not work with the
-	  standard distribution of HTTP::Daemon.
+	  standard distribution of HTTP::Daemon (use HTTP::Daemon::SSL
+	  instead).
 
 v0.92   2002.10.22
 	- Changed the fileno() function to support returning the fileno
@@ -109,7 +128,7 @@ v0.81a (Not publically released)
 	- Added support for SSL_passwd_cb.
 	- Added accept() server socket support to socketToSSL().
 
-v0.81   20020410
+v0.81   2002.04.10
 	- calling context_init twice destroyed global context. fix from
 	  Jason Heiss <jheiss at ofb.net>.
 	- file handle tying interface implementation moved to a separate
@@ -121,21 +140,21 @@ v0.81   20020410
 	- socketToSSL() now respects context's SSL verify setting
 	  reported by Uri Guttman <uri at stemsystems.com>.
 
-v0.80	20010819
+v0.80	2001.08.19
 	- fixed startTLS support (socketToSSL) (Graham Barr <gbarr at pobox.com>)
 	- make accept() set fileno attribute on newly created IO::Socket::SSL
 	  object (Martin Oldfield <m at mail.tc>).
 	- certificate updates.
 	- use SSL_CTX_use_PrivateKey_file in SSL_Context::new.
 
-v0.79	20010604
+v0.79	2001.06.04
 	- angle bracket readline operator support
 	  (David Darville <david at dark.x.dtu.dk>).
 	- eliminate warnings in choosing SSL protocol version.
 	- implement our own opened method and make length parameter optional
 	  in syswrite (Robert Bihlmeyer <robbe at orcus.priv.at>).
 
-v0.78	20010424
+v0.78	2001.04.24
 	- test script targets changed, certificate setup fixed
 	- support for TLS in SSL_version. SSL_version parameter values
 	  changed from integer to string. NB: this is an incompatible change.
@@ -149,22 +168,22 @@ v0.78	20010424
 	- include the Apache CA bundle file in the distribution (my-ca.pem).
 	- BUGS file added.
 
-v0.77	20010115
+v0.77	2001.01.15
 	- don't setup SSL CA verification unless cert verification is
 	  actually used for the connections.
 	- default SSL protocol version selection in SSL.pm.
 
-v0.76	20001117
+v0.76	2000.11.17
 	- patch from Kwok Chern Yue <chernyue at post1.com> for
 	  making IO::Socket::SSL work with HTTP::Daemon.
 
-v0.75	20000726
+v0.75	2000.07.26
 	- IO::Socket::SSL should now work with perl v5.6.0
 	- demo/*.pl and t/*.t now turn module debugging on if
 	  DEBUG command line argument is given
 	- default certificates changed
 
-v0.74	20000705
+v0.74	2000.07.05
 	- Changes file added
 	- bugfix in IO::Socket::SSL::sysread() (zliu2 at acsu.buffalo.edu)
 	- libwww-perl and IO::Socket::SSL UML models added in docs

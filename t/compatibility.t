@@ -59,8 +59,8 @@ print "ok\n";
 
 my $contact = $server->accept;
 
-IO::Socket::SSL::socketToSSL($contact, 
-			     {SSL_server => 1, 
+IO::Socket::SSL::socketToSSL($contact,
+			     {SSL_server => 1,
 			      SSL_verify_mode => 0}) || print "not ";
 print "ok\n";
 <$contact>;

@@ -22,7 +22,7 @@ use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.94';
+    $VERSION = '0.95';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -52,7 +52,7 @@ sub configure {
 	|| return;
 
     return ($self->SUPER::configure($arg_hash)
-	|| $self->error("IO::Socket::INET configuration failed"));
+	|| $self->error("@ISA configuration failed"));
 }
 
 sub configure_SSL {
@@ -72,7 +72,7 @@ sub configure_SSL {
 	 'SSL_version' => 'sslv23',
 	 'SSL_cipher_list' => 'ALL:!LOW:!EXP');
 
-    #Replace nonexistant entries with defaults
+    #Replace nonexistent entries with defaults
     $arg_hash = { %default_args, %$GLOBAL_CONTEXT_ARGS, %$arg_hash };
 
     #Avoid passing undef arguments to Net::SSLeay
@@ -93,7 +93,7 @@ sub connect {
     return IO::Socket::SSL->error("Undefined IO::Socket::SSL object") unless($self);
 
     my $socket = $self->SUPER::connect(@_)
-	|| return $self->error("IO::Socket::INET connect attempt failed");
+	|| return $self->error("@ISA connect attempt failed");
 
     return $self->connect_SSL($socket) || $self->fatal_ssl_error;
 }
@@ -104,7 +104,7 @@ sub connect_SSL {
     my $arg_hash = ${*$self}{'_SSL_arguments'};
     ${*$self}{'_SSL_opened'}=1;
 
-    my $fileno = ${*$self}{'_SSL_fileno'} = $socket->fileno();
+    my $fileno = ${*$self}{'_SSL_fileno'} = fileno($socket);
     return $self->error("Socket has no fileno") unless (defined $fileno);
 
     my $ctx = ${*$self}{'_SSL_ctx'};  # Reference to real context
@@ -136,7 +136,7 @@ sub accept {
     my $arg_hash = ${*$self}{'_SSL_arguments'};
 
     my $socket = $self->SUPER::accept($class)
-	|| return $self->error("IO::Socket::INET accept failed");
+	|| return $self->error("@ISA accept failed");
 
     return ($socket->accept_SSL(${*$self}{'_SSL_ctx'}, $arg_hash)
 	    || $self->error($ERROR) || $socket->fatal_ssl_error);
@@ -200,7 +200,7 @@ sub peek {
     if ($Net::SSLeay::VERSION >= 1.19 && &Net::SSLeay::OPENSSL_VERSION_NUMBER >= 0x0090601f) {
 	return $self->generic_read(\&Net::SSLeay::peek, @_);
     } else {
-	return $self->error("SSL_peek not supported for Net::SSLeay < v1.19 or OpenSSL < 0.9.6a");
+	return $self->error("SSL_peek not supported for Net::SSLeay < v1.19 or OpenSSL < v0.9.6a");
     }
 }
 
@@ -249,7 +249,7 @@ sub printf {
 sub getc {
     my $self = shift;
     my $buffer;
-    return $self->read($buffer, 1, 0) ? $buffer : ();
+    return $buffer if $self->read($buffer, 1, 0);
 }
 
 sub readline {
@@ -285,11 +285,11 @@ sub close {
 	&Net::SSLeay::X509_free(${*$self}{'_SSL_certificate'});
     }
 
-    my $arg_hash = ${*$self}{'_SSL_arguments'};
-    untie(*$self) if (!$arg_hash->{'SSL_server'} 
-		      and !$close_args->{_SSL_in_DESTROY});
-
     ${*$self}{'_SSL_opened'}=0;
+    my $arg_hash = ${*$self}{'_SSL_arguments'};
+    untie(*$self) unless ($arg_hash->{'SSL_server'}
+		       or $close_args->{_SSL_in_DESTROY});
+
     $self->SUPER::close unless ($close_args->{_SSL_in_DESTROY});
 }
 
@@ -409,7 +409,7 @@ sub error {
 
 sub DESTROY {
     my $self = shift || return;
-    $self->close(_SSL_in_DESTROY => 1) if (${*$self}{'_SSL_opened'});
+    $self->close(_SSL_in_DESTROY => 1, SSL_no_shutdown => 1) if (${*$self}{'_SSL_opened'});
     delete(${*$self}{'_SSL_ctx'});
 }
 
@@ -429,7 +429,7 @@ sub context_init {
 
 sub opened {
     my $self = shift;
-    return ${*$self}{'_SSL_opened'};
+    return IO::Handle::opened($self) && ${*$self}{'_SSL_opened'};
 }
 
 sub want_read {
@@ -444,60 +444,58 @@ sub want_write {
 
 
 #Redundant IO::Handle functionality
-sub getline { return(scalar shift->readline()) }
+sub getline  { return(scalar shift->readline()) }
 sub getlines { if (wantarray()) { return(shift->readline()) }
-	       else { croak("Use of getlines() not allowed in scalar context\n");  }}
+	       else { croak("Use of getlines() not allowed in scalar context");  }}
 
 #Useless IO::Handle functionality
-sub truncate { croak("Use of truncate() not allowed with SSL\n") }
-sub stat { croak("Use of stat() not allowed with SSL\n") }
-sub ungetc { croak("Use of ungetc() not supported with this version of IO::Socket::SSL") }
-sub setbuf { croak("Use of setbuf() not allowed with SSL\n") }
-sub setvbuf { croak("Use of setvbuf() not allowed with SSL\n") }
-sub fdopen { croak("Use of fdopen() not allowed with SSL\n") }
+sub truncate { croak("Use of truncate() not allowed with SSL") }
+sub stat     { croak("Use of stat() not allowed with SSL"    ) }
+sub setbuf   { croak("Use of setbuf() not allowed with SSL"  ) }
+sub setvbuf  { croak("Use of setvbuf() not allowed with SSL" ) }
+sub fdopen   { croak("Use of fdopen() not allowed with SSL"  ) }
 
+#Unsupported socket functionality
+sub ungetc { croak("Use of ungetc() not implemented in IO::Socket::SSL") }
+sub send   { croak("Use of send() not implemented in IO::Socket::SSL; use print/printf/syswrite instead") }
+sub recv   { croak("Use of recv() not implemented in IO::Socket::SSL; use read/sysread instead") }
 
 package IO::Socket::SSL::SSL_HANDLE;
+use strict;
+use vars qw($HAVE_WEAKREF);
+
+BEGIN {
+    #Use Scalar::Util or WeakRef if possible:
+    eval "use Scalar::Util qw(weaken isweak); 1" or
+	eval "use WeakRef";
+    $HAVE_WEAKREF = $@ ? 0 : 1;
+}
 
 sub TIEHANDLE {
     my ($class, $handle) = @_;
+    weaken($handle) if $HAVE_WEAKREF;
     bless \$handle, $class;
 }
-sub PRINT {
-    my $handle = shift;
-    return ${$handle}->print(@_);
-}
-sub PRINTF {
-    my $handle = shift;
-    return ${$handle}->printf(@_);
-}
-sub WRITE {
-    my $handle = shift;
-    return ${$handle}->write(@_);
-}
-sub READLINE {
-    my $handle = shift;
-    return ${$handle}->readline(@_);
-}
-sub GETC {
-    my $handle = shift;
-    return ${$handle}->getc(@_);
-}
-sub READ {
-    my $handle = shift;
-    return ${$handle}->read(@_);
-}
+
+sub READ     { return ${shift()}->read    (@_) }
+sub READLINE { return ${shift()}->readline(@_) }
+sub GETC     { return ${shift()}->getc    (@_) }
+
+sub PRINT    { return ${shift()}->print   (@_) }
+sub PRINTF   { return ${shift()}->printf  (@_) }
+sub WRITE    { return ${shift()}->write   (@_) }
+
+sub FILENO   { return ${shift()}->fileno  (@_) }
+
 sub CLOSE {                          #<---- Do not change this function!
     my $ssl = ${$_[0]};
     local @_;
     return $ssl->close();
 }
-sub FILENO {
-    my $handle = shift;
-    return ${$handle}->fileno(@_);
-}
+
 
 package IO::Socket::SSL::SSL_Context;
+use strict;
 
 sub new {
     my ($class, $arg_hash) = @_;
@@ -514,7 +512,7 @@ sub new {
 	                    &Net::SSLeay::CTX_new();
     }
 
-    $ctx || return IO::Socket::SSL->error("Context-init failed");
+    $ctx || return IO::Socket::SSL->error("SSL Context init failed");
 
     &Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL());
 
@@ -527,13 +525,13 @@ sub new {
     }
 
     if ($arg_hash->{'SSL_check_crl'}) {
-	if (&Net::SSLeay::OPENSSL_VERSION_NUMBER >= 0x0090702f) 
+	if (&Net::SSLeay::OPENSSL_VERSION_NUMBER >= 0x0090702f)
 	{
 	    &Net::SSLeay::X509_STORE_CTX_set_flags
 		(&Net::SSLeay::CTX_get_cert_store($ctx),
 		 &Net::SSLeay::X509_V_FLAG_CRL_CHECK);
 	} else {
-	    return IO::Socket::SSL->error("CRL not supported for OpenSSL versions less than 0.9.7b");
+	    return IO::Socket::SSL->error("CRL not supported for OpenSSL < v0.9.7b");
 	}
     }
 
@@ -558,7 +556,7 @@ sub new {
 	    || return IO::Socket::SSL->error("Failed to open Certificate");
     }
 
-    my $verify_callback = $verify_cb && 
+    my $verify_callback = $verify_cb &&
 	sub {
 	    my ($ok, $ctx_store) = @_;
 	    my ($cert, $error);
@@ -629,7 +627,7 @@ see the note about return values).
 
 IO::Socket::SSL inherits its methods from IO::Socket::INET, overriding them
 as necessary.  If there is an SSL error, the method or operation will return an
-empty list (false in all contexts).  The methods that have changed from the 
+empty list (false in all contexts).  The methods that have changed from the
 perspective of the user are re-documented here:
 
 =over 4
@@ -670,7 +668,7 @@ encrypted, you will be prompted to enter a password before the socket is formed
 =item SSL_cert_file
 
 If your SSL certificate is not in the default place (F<certs/server-cert.pem> for servers,
-F<certs/client-cert.pem> for clients), then you should use this option to specify the 
+F<certs/client-cert.pem> for clients), then you should use this option to specify the
 location of your certificate.  Note that a key and certificate are only required for an
 SSL server, so you do not need to bother with these trifling options should you be
 setting up an unauthenticated client.
@@ -701,7 +699,7 @@ point IO::Socket::SSL to the right place to look.
 
 This option sets the verification mode for the peer certificate.  The default
 (0x00) does no authentication.  You may combine 0x01 (verify peer), 0x02 (fail
-verification if no peer certificate exists; ignored for clients), and 0x04 
+verification if no peer certificate exists; ignored for clients), and 0x04
 (verify client once) to change the default.
 
 =item SSL_verify_callback
@@ -720,12 +718,12 @@ is valid or invalid.  The default is to let OpenSSL do all of the busy work.
 If you want to verify that the peer certificate has not been revoked by the
 signing authority, set this value to true.  OpenSSL will search for the CRL
 in your SSL_ca_path.  See the Net::SSLeay documentation for more details.
-Note that this functionality appears to be broken with OpenSSL < 0.9.7b,
+Note that this functionality appears to be broken with OpenSSL < v0.9.7b,
 so its use with lower versions will result in an error.
 
 =item SSL_reuse_ctx
 
-If you have already set the above options (SSL_use_cert through SSL_verify_mode;
+If you have already set the above options (SSL_version through SSL_check_crl;
 this does not include SSL_cipher_list yet) for a previous instance of
 IO::Socket::SSL, then you can reuse the SSL context of that instance by passing
 it as the value for the SSL_reuse_ctx parameter.  If you pass any context-related options,
@@ -735,10 +733,10 @@ a global SSL context will not be implicitly used.
 =item SSL_error_trap
 
 When using the accept() or connect() methods, it may be the case that the
-actual socket connection works by the SSL negotiation fails, as in the case of
+actual socket connection works but the SSL negotiation fails, as in the case of
 an HTTP client connecting to an HTTPS server.  Passing a subroutine ref attached
-to this parameter allows you to gain control of this socket instead of having it
-be forcibly closed.  The subroutine, if called, will be passed two parameters: 
+to this parameter allows you to gain control of the orphaned socket instead of having it
+be closed forcibly.  The subroutine, if called, will be passed two parameters:
 a reference to the socket on which the SSL negotiation failed and and the full
 text of the error message.
 
@@ -750,9 +748,9 @@ There are a number of nasty traps that lie in wait if you are not careful about 
 close().  The first of these will bite you if you have been using shutdown() on your
 sockets.  Since the SSL protocol mandates that a SSL "close notify" message be
 sent before the socket is closed, a shutdown() that closes the socket's write channel
-will cause the close call to hang.  For a similar reason, if you try to close a
+will cause the close() call to hang.  For a similar reason, if you try to close a
 copy of a socket (as in a forking server) you will affect the original socket as well.
-To get around these problems, call close with an object-oriented syntax 
+To get around these problems, call close with an object-oriented syntax
 (e.g. $socket->close(SSL_no_shutdown => 1))
 and one or more of the following parameters:
 
@@ -771,7 +769,7 @@ you close it, set this option to a true value.
 
 =back
 
-=item B<peek()>
+=item B<peek(...)>
 
 This function has exactly the same syntax as sysread(), and performs nearly the same
 task (reading data from the socket) but will not advance the read position so
@@ -806,8 +804,8 @@ with all the information about the particular field in one parsable line.
 =item B<errstr()>
 
 Returns the last error (in string form) that occurred.  If you do not have a real
-object to perform this method on, call &IO::Socket::SSL::errstr() instead.
-For read and write errors on non-blocking sockets, this method may include the string 
+object to perform this method on, call IO::Socket::SSL::errstr() instead.
+For read and write errors on non-blocking sockets, this method may include the string
 C<SSL wants a read first!> or C<SSL wants a write first!> meaning that the other side
 is expecting to read from or write to the socket and wants to be satisfied before you
 get to do anything.
@@ -841,6 +839,13 @@ will emit a large CROAK() if you are silly enough to use them:
 
 =item fdopen
 
+=item send/recv
+
+Note that send() and recv() cannot be reliably trapped by a tied filehandle (such as
+that used by IO::Socket::SSL) and so may send unencrypted data over the socket.  Object-oriented
+calls to these functions will fail, telling you to use the print/printf/syswrite
+and read/sysread families instead.
+
 =back
 
 
@@ -857,12 +862,14 @@ using them in any way that you consider meaningful.
 
 =head1 IPv6
 
-Support for IPv6 with IO::Socket::SSL is highly experimental, as none of the author's
-machines use IPv6 and hence he cannot test IO::Socket::SSL with them.  However, if
-you consider yourself sufficiently ready for bug-reporting, pass the 'inet6' option
-to IO::Socket::SSL when calling it (i.e. C<use IO::Socket::SSL qw(inet6);>).  You will
-need IO::Socket::INET6 to use this option.  If you absolutely do not want to use this
-(or want a quick change back to IPv4), pass the 'inet4' option instead.
+Support for IPv6 with IO::Socket::SSL is expected to work, but is experimental, as
+none of the author's machines use IPv6 and hence he cannot test IO::Socket::SSL with
+them.  However, a few brave people have used it without incident, so if you wish to
+make IO::Socket::SSL IPv6 aware, pass the 'inet6' option to IO::Socket::SSL when
+calling it (i.e. C<use IO::Socket::SSL qw(inet6);>).  You will need IO::Socket::INET6
+and Socket6 to use this option, and you will also need to write C<use Socket6;> before
+using IO::Socket::SSL.  If you absolutely do not want to use this (or want a quick
+change back to IPv4), pass the 'inet4' option instead.
 
 
 =head1 DEBUGGING
@@ -907,13 +914,13 @@ See the 'example' directory.
 
 I have never shipped a module with a known bug, and IO::Socket::SSL is no
 different.  If you feel that you have found a bug in the module and you are
-using the latest versions of Net::SSLeay and OpenSSL, send an email immediately to 
-<behrooz at fas.harvard.edu> with a subject of 'IO::Socket::SSL Bug'.  I am 
+using the latest versions of Net::SSLeay and OpenSSL, send an email immediately to
+<behrooz at fas.harvard.edu> with a subject of 'IO::Socket::SSL Bug'.  I am
 I<not responsible> for problems in your code, so make sure that an example
-actually works before sending it. It is merely acceptable if you send me a bug 
+actually works before sending it. It is merely acceptable if you send me a bug
 report, it is better if you send a small chunk of code that points it out,
-and it is best if you send a patch--if the patch is good, you might see a release the 
-next day on CPAN. Otherwise, it could take weeks . . . 
+and it is best if you send a patch--if the patch is good, you might see a release the
+next day on CPAN. Otherwise, it could take weeks . . .
 
 
 =head1 LIMITATIONS
@@ -922,13 +929,19 @@ IO::Socket::SSL uses Net::SSLeay as the shiny interface to OpenSSL, which is
 the shiny interface to the ugliness of SSL.  As a result, you will need both Net::SSLeay
 and OpenSSL on your computer before using this module.
 
+If you have Scalar::Util (standard with Perl 5.8.0 and above) or WeakRef, IO::Socket::SSL
+sockets will auto-close when they go out of scope, just like IO::Socket::INET sockets.  If
+you do not have one of these modules, then IO::Socket::SSL sockets will stay open until the
+program ends or you explicitly close them.  This is due to the fact that a circular reference
+is required to make IO::Socket::SSL sockets act simultaneously like objects and glob references.
+
 =head1 DEPRECATIONS
 
 The following functions are deprecated and are only retained for compatibility:
 
 =over 2
 
-=item context_init() 
+=item context_init()
 
 (use the SSL_reuse_ctx option if you want to re-use a context)
 
@@ -938,7 +951,7 @@ The following functions are deprecated and are only retained for compatibility:
 (use IO::Socket::SSL->start_SSL() instead)
 
 
-=item get_peer_certificate() and friends 
+=item get_peer_certificate() and friends
 
 (use the peer_certificate() function instead)
 
@@ -958,7 +971,7 @@ The following classes have been removed:
 
 (not that you should have been directly accessing this anyway):
 
-=item X509_Certificate 
+=item X509_Certificate
 
 (but get_peer_certificate() will still Do The Right Thing)
 
@@ -986,8 +999,8 @@ modify it under the same terms as Perl itself.
 
 =head1 Appendix: Using SSL
 
-If you are unfamiliar with the way OpenSSL works, a good reference may be found in
-both the book "Network Security with OpenSSL" (Oreilly & Assoc.) and the web site 
+If you are unfamiliar with the way OpenSSL works, good references may be found in
+both the book "Network Security with OpenSSL" (Oreilly & Assoc.) and the web site
 L<http://www.tldp.org/HOWTO/SSL-Certificates-HOWTO/>.  Read on for a quick overview.
 
 =head2 The Long of It (Detail)
@@ -995,13 +1008,13 @@ L<http://www.tldp.org/HOWTO/SSL-Certificates-HOWTO/>.  Read on for a quick overv
 The usual reason for using SSL is to keep your data safe.  This means that not only
 do you have to encrypt the data while it is being transported over a network, but
 you also have to make sure that the right person gets the data.  To accomplish this
-with SSL, you have to use certificates.  A certificate closely resembles a 
+with SSL, you have to use certificates.  A certificate closely resembles a
 Government-issued ID (at least in places where you can trust them).  The ID contains some sort of
 identifying information such as a name and address, and is usually stamped with a seal
 of Government Approval.  Theoretically, this means that you may trust the information on
 the card and do business with the owner of the card.  The same ideas apply to SSL certificates,
 which have some identifying information and are "stamped" [most people refer to this as
-I<signing> instead] by someone (a Certificate Authority) who you trust will adequately 
+I<signing> instead] by someone (a Certificate Authority) who you trust will adequately
 verify the identifying information.  In this case, because of some clever number theory,
 it is extremely difficult to falsify the stamping process.  Another useful consequence
 of number theory is that the certificate is linked to the encryption process, so you may
@@ -1028,3 +1041,5 @@ get a real certificate back, after which you can start serving people.  For clie
 you will not need anything unless the server wants validation, in which case you will
 also need a private key and a real certificate.  For more information about how to
 get these, see L<http://www.modssl.org/docs/2.8/ssl_faq.html#ToC24>.
+
+=cut

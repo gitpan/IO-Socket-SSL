@@ -7,19 +7,28 @@
 
 
 use strict;
-use IO::Socket::SSL qw(debug4);
+use IO::Socket::SSL;
 
 my ($v_mode, $sock, $buf);
 
 if($ARGV[0] eq "DEBUG") { $IO::Socket::SSL::DEBUG = 1; }
 
+# Check to make sure that we were not accidentally run in the wrong
+# directory:
+unless (-d "certs") {
+    if (-d "../certs") {
+	chdir "..";
+    } else {
+	die "Please run this example from the IO::Socket::SSL distribution directory!\n";
+    }
+}
 
-if(!($sock = IO::Socket::SSL->new( PeerAddr => '192.168.167.166',
+if(!($sock = IO::Socket::SSL->new( PeerAddr => 'localhost',
 				   PeerPort => '9000',
 				   Proto    => 'tcp',
-#				   SSL_use_cert => 1,
-#				   SSL_verify_mode => 0x01,
-#				   SSL_passwd_cb => sub { return "opossum" },
+				   SSL_use_cert => 1,
+				   SSL_verify_mode => 0x01,
+				   SSL_passwd_cb => sub { return "opossum" },
 				 ))) {
     warn "unable to create socket: ", &IO::Socket::SSL::errstr, "\n";
     exit(0);

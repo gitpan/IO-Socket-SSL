@@ -1,0 +1,10 @@
+#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
+name:         IO-Socket-SSL
+version:      0.95
+version_from: SSL.pm
+installdirs:  site
+requires:
+    Net::SSLeay:                   1.08
+
+distribution_type: module
+generated_by: ExtUtils::MakeMaker version 6.13
