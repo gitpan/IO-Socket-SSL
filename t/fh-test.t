@@ -1,8 +1,8 @@
 #
 # a test client for testing IO::Socket::SSL's behavior
-# with tied filehandles (aspa@hip.fi).
+# with tied filehandles (aspa@kronodoc.fi).
 #
-# $Id: fh-test.t,v 1.5 2000/08/08 06:32:14 aspa Exp $.
+# $Id: fh-test.t,v 1.9 2001/04/24 06:44:38 aspa Exp $.
 #
 
 use IO::Socket::SSL;
@@ -21,7 +21,7 @@ sub ssl_fh_test {
   my $buf = "";
   my ($cnt, $r) = (0, 0);
   
-  if(!($sock = IO::Socket::SSL->new( PeerAddr => 'www.helsinki.fi',
+  if(!($sock = IO::Socket::SSL->new( PeerAddr => 'www.thawte.com',
 				     PeerPort => '443',
 				     Proto    => 'tcp',
 				     SSL_verify_mode => 0x01,

@@ -2,7 +2,7 @@
 # a test client for testing IO::Socket::SSL-class's behavior
 # (aspa@kronodoc.fi).
 #
-# $Id: ssl_client.pl,v 1.5 2000/11/08 09:25:42 aspa Exp $.
+# $Id: ssl_client.pl,v 1.6 2001/04/24 06:34:34 aspa Exp $.
 #
 
 
@@ -18,7 +18,7 @@ if(!($sock = IO::Socket::SSL->new( PeerAddr => 'localhost',
 				   PeerPort => '9000',
 				   Proto    => 'tcp',
 				   SSL_use_cert => 1,
-				   SSL_verify_mode => 0x00,
+				   SSL_verify_mode => 0x01,
 				 ))) {
   print STDERR "unable to create socket: '$!'.\n";
   exit(0);

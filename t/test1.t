@@ -1,7 +1,7 @@
 #
 # a test client for testing IO::Socket::SSL's behavior (aspa@hip.fi).
 #
-# $Id: test1.t,v 1.4 2000/08/08 06:33:16 aspa Exp $.
+# $Id: test1.t,v 1.6 2001/04/24 06:17:23 aspa Exp $.
 #
 
 use IO::Socket::SSL;
@@ -13,7 +13,7 @@ if($debug eq "DEBUG") { $IO::Socket::SSL::DEBUG = 1; }
 
 print "1..4\n";
 
-if(!($sock = IO::Socket::SSL->new( PeerAddr => 'www.helsinki.fi',
+if(!($sock = IO::Socket::SSL->new( PeerAddr => 'www.thawte.com',
 			    PeerPort => '443',
 			    Proto    => 'tcp',
 			    SSL_verify_mode => 0x01,

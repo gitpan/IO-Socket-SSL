@@ -1,8 +1,8 @@
 #
 # a test client for testing IO::Socket::SSL-class's behavior
-# together with LWP (aspa@hip.fi).
+# together with LWP (aspa@iki.fi).
 #
-# $Id: lwptest.t,v 1.4 2000/08/08 06:32:50 aspa Exp $.
+# $Id: lwptest.t,v 1.10 2001/04/24 06:15:44 aspa Exp $.
 #
 
 use strict;
@@ -37,12 +37,10 @@ my $r = IO::Socket::SSL::context_init({
 # CA cert filenames can be generated with:
 # 'ssleay x509 -hash < ca-cert.pem'
 
-# ddc328ff.0.
-$rq1 = new HTTP::Request('GET', 'https://www.fortify.net');
-# 5db5ffbd.0.
-$rq2 = new HTTP::Request('GET', 'https://www.helsinki.fi');
+$rq1 = new HTTP::Request('GET', 'https://www.thawte.com');
+$rq2 = new HTTP::Request('GET', 'https://www.verisign.com');
 # CA cert not present.
-$rq3 = new HTTP::Request('GET', 'https://www.verisign.com');
+$rq3 = new HTTP::Request('GET', 'https://www.helsinki.fi');
 
 print "1..3\n";
 
@@ -64,8 +62,10 @@ if($rq1) {
 if($rq2) {
   $res = $ua->request($rq2);
   if($res->is_success) {
-    #print STDERR "request 2: success.\n";
-    #print STDERR "" . $res->headers->as_string() . "\n";
+    if ($IO::Socket::SSL::DEBUG) {
+      print STDERR "request 2: success.\n";
+      print STDERR "" . $res->headers->as_string() . "\n";
+    }
     print "ok\n";
   } else {
     #print STDERR "request 2: failed.\n";

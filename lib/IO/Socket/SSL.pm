@@ -1,13 +1,13 @@
 #
 #
 # a class for implementing a IO::Socket::INET type interface
-# to SSL-sockets (aspa@hip.fi).
+# to SSL-sockets (aspa@kronodoc.fi).
 #
 # this implementation draws from Crypt::SSLeay (Net::SSL)
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.19 2001/01/09 12:38:00 aspa Exp aspa $.
+# $Id: SSL.pm,v 1.29 2001/04/24 06:41:55 aspa Exp $.
 #
 
 #
@@ -44,7 +44,7 @@ use Net::SSLeay;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.77';
+$IO::Socket::SSL::VERSION = '0.78';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -73,7 +73,7 @@ my $DEFAULT_USE_CERT = 0;
 # &Net::SSLeay::VERIFY_NONE, &Net::SSLeay::VERIFY_PEER();
 my $DEFAULT_VERIFY_MODE = &Net::SSLeay::VERIFY_PEER();
 my $DEFAULT_CIPHER_LIST = "ALL:!LOW:!EXP";
-my $DEFAULT_SSL_VERSION = "3";
+my $DEFAULT_SSL_VERSION = undef;
 
 #
 # ******************** IO::Socket::SSL class ********************
@@ -667,18 +667,26 @@ sub new {
     $key_file=$args->{'SSL_key_file'}||$DEFAULT_CLIENT_KEY_FILE;
     $cert_file=$args->{'SSL_cert_file'}||$DEFAULT_CLIENT_CERT_FILE;
   }
-  $ca_file = $args->{'SSL_ca_file'} || $DEFAULT_CA_FILE;
+  $ca_file =  (defined $args->{'SSL_ca_file'}) ?
+    $args->{'SSL_ca_file'} : $DEFAULT_CA_FILE;
   $ca_path = $args->{'SSL_ca_path'} || $DEFAULT_CA_PATH;
   $verify_mode = (defined $args->{'SSL_verify_mode'}) ? 
       $args->{'SSL_verify_mode'} : $DEFAULT_VERIFY_MODE;
   $use_cert = $args->{'SSL_use_cert'} || $DEFAULT_USE_CERT;
 
   my $CTX_constructor = undef;
-  if($DEFAULT_SSL_VERSION == 2) {
+  my $ssl_version = $args->{'SSL_version'} || $DEFAULT_SSL_VERSION;
+  if($ssl_version eq "sslv2" ) {
     $CTX_constructor = \&Net::SSLeay::CTX_v2_new;
-  } elsif ($DEFAULT_SSL_VERSION == 3) {
+    print STDERR "using SSLv2\n" if($IO::Socket::SSL::DEBUG);
+  } elsif ($ssl_version eq "sslv3" ) {
     $CTX_constructor = \&Net::SSLeay::CTX_v3_new;
+    print STDERR "using SSLv3\n" if($IO::Socket::SSL::DEBUG);
+  } elsif ($ssl_version eq "tlsv1") {
+    $CTX_constructor = \&Net::SSLeay::CTX_tlsv1_new;
+    print STDERR "using TLSv1\n" if($IO::Socket::SSL::DEBUG);
   } else { # SSL v23
+    print STDERR "using SSLv2/3\n" if($IO::Socket::SSL::DEBUG);
     $CTX_constructor = \&Net::SSLeay::CTX_new;
   }
 
@@ -688,10 +696,10 @@ sub new {
     return IO::Socket::SSL::_myerror("CTX_new(): '$err_str'.");
   }
 
-  if( !($verify_mode == &Net::SSLeay::VERIFY_NONE()) ) {
-      # set options for the context.
-      $r = Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL() );
+  # set options for the context.
+  $r = Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL() );
       
+  if( !($verify_mode == &Net::SSLeay::VERIFY_NONE()) ) {
       # set SSL certificate load paths.
       if(!($r = Net::SSLeay::CTX_load_verify_locations($ctx,
 						       $ca_file,
@@ -706,7 +714,7 @@ sub new {
   #       mode are associated only to the SSL context. this is
   #       because they are client/server specific attributes and
   #       it doesn't seem to make much sense to change them between
-  #       requests (aspa@hip.fi).
+  #       requests (aspa@kronodoc.fi).
 
   # load certificate and private key.
   if( $is_server || $use_cert ) {
