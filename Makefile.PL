@@ -16,6 +16,8 @@ unless (defined $ENV{EGD_PATH}) {
     }
 }
 
+$| = 1;
+
 $SIG{__WARN__} = sub {
     undef $SIG{__WARN__};
     my $warning  = shift;

@@ -1,4 +1,37 @@
-v0.95
+v0.96
+	- Makefile's error messages now correct if output is
+	  redirected (patch from Ilya Zakharevich <ilya at
+	  math.berkeley.edu>).
+	- Non-blocking connects/accepts now work (Problem found by
+	  Uri Guttman <uri at stemsystems.com>).
+	- new_from_fd() now works.
+	- getline() and <> in scalar context now return undef
+	  instead of '' when the read failed.  (Problem found by
+	  Christian Gilmore <cat at us.ibm.com>).
+	- Broken pipe signals are now ignored during socket close
+	  to prevent a SSL shutdown message from killing the parent
+	  program.  (Problem found by Christian Gilmore).
+	- Tests should proceed much more quickly, and a semi-race was
+	  fixed, meaning that on slow machines the tests should be
+	  more reliable.
+	- Check for Scalar::Util and Weakref now uses default
+	  $SIG{__DIE__} instead of a potentially user-altered one
+	  (suggestion from Olaf Schneider <Olaf.Schneider at
+	  iwr.fzk.de>).  This only applies to Perl 5.6.0 & above.
+	- Session caching support (patch from Marko Asplund
+	  <marko.asplund at kronodoc.fi>).
+	- set_default_context() added to alter the behavior of
+	  modules that use IO::Socket::SSL from the main program.
+	- get_ssl_object() renamed to _get_ssl_object() to reflect
+	  the fact that it's only supposed to be used internally
+	  (not that you should have cared, of course).
+	- Added patch for Net::SSLeay to take advantage of
+	  client-side session caching.
+
+
+--- Old Versions --------------------------------------------------
+
+v0.95  2003.8.25
 	- Changed PeerAddr in example/ssl_client.pl back to localhost.
 	- Update of examples to automatically switch to the proper
 	  directory if they cannot find the necessary SSL certificates.
@@ -15,8 +48,6 @@ v0.95
 	  data.  The Perl builtin functions cannot be reliably trapped
 	  and are still dangerous, a fact that the POD now reflects
 	  (Problem noted by Michal Ludvig <michal at logix.cx>).
-
---- Old Versions --------------------------------------------------
 
 v0.94  2003.6.26
 	- Changed accept() to use inherited accept() instead of

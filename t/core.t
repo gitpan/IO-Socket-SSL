@@ -7,13 +7,13 @@ use IO::Socket::SSL;
 eval {require "t/ssl_settings.req";} ||
 eval {require "ssl_settings.req";};
 
-$GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS = eval "use 5.006; return 1";
+$GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS = eval "use 5.006; use IO::Select; return 1";
 $NET_SSLEAY_VERSION = $Net::SSLeay::VERSION;
 $OPENSSL_VERSION = 0;
 $OPENSSL_VERSION = &Net::SSLeay::OPENSSL_VERSION_NUMBER if ($NET_SSLEAY_VERSION>=1.19);
 $CAN_PEEK = ($OPENSSL_VERSION >= 0x0090601f) ? 1 : 0;
 
-$numtests = 32;
+$numtests = 35;
 $|=1;
 
 foreach ($^O) {
@@ -24,7 +24,8 @@ foreach ($^O) {
 }
 
 if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
-    $numtests++;
+    $numtests+=5;
+    $numtests+=4 if ($NET_SSLEAY_VERSION>=1.16)
 }
 
 if ($NET_SSLEAY_VERSION>=1.16) {
@@ -37,126 +38,6 @@ if ($CAN_PEEK) {
 }
 
 print "1..$numtests\n";
-
-$test = 0;
-
-unless (fork) {
-    sleep 1;
-    %extra_options = ($Net::SSLeay::VERSION>=1.16) ?
-        (SSL_key_file => "certs/server-key.enc", SSL_passwd_cb => sub { return "bluebell" },
-	 SSL_verify_callback => \&verify_sub) :
-        (SSL_key_file => "certs/server-key.pem");
-
-
-    my $client = new IO::Socket::INET(PeerAddr => $SSL_SERVER_ADDR,
-				      PeerPort => $SSL_SERVER_PORT);
-
-    print $client "Test\n";
-    (<$client> eq "This server is SSL only") || print "not ";
-    &ok("client");
-    close $client;
-
-    $client = new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR,
-				  PeerPort => $SSL_SERVER_PORT,
-				  SSL_verify_mode => 0x01,
-				  SSL_ca_file => "certs/test-ca.pem",
-				  SSL_use_cert => 1,
-				  SSL_cert_file => "certs/server-cert.pem",
-				  SSL_version => 'TLSv1',
-				  SSL_cipher_list => 'HIGH',
-				  %extra_options);
-    
-    
-    sub verify_sub {
-	my ($ok, $ctx_store, $cert, $error) = @_;
-	unless ($ok && $ctx_store && $cert && !$error) 
-	{ print("not ok #client failure\n") && exit; }
-	($cert =~ /Dummy IO::Socket::SSL/) || print "not";
-	&ok("client");
-	return 1;
-    }
-
-
-    $client || (print("not ok #client failure\n") && exit);
-    &ok("client");
-
-    $client->fileno() || print "not ";
-    &ok("client");
-
-#    $client->untaint() if ($HAVE_SCALAR_UTIL);  # In the future...
-
-    $client->dump_peer_certificate() || print "not ";
-    &ok("client");
-
-    $client->peer_certificate("issuer") || print "not ";
-    &ok("client");
-
-    $client->get_cipher() || print "not ";
-    &ok("client");
-
-    $client->syswrite('00waaaanf00', 7, 2);
-
-    if ($CAN_PEEK) {
-	my $buffer;
-	$client->read($buffer,2);
-	print "not " if ($buffer ne 'ok');
-	&ok("client");
-    }
-
-    $client->print("Test\n");
-    send($client, "Test\n", 0);
-    $client->printf("\$%.2f\n%d\n%c\n%s", 1.0444442342, 4.0, ord("y"), "Test\nBeaver\nBeaver\n");
-    shutdown($client, 1);
-
-    my $buffer="\0\0aaaaaaaaaaaaaaaaaaaa";
-    $client->sysread($buffer, 7, 2);
-    print "not " if ($buffer ne "\0\0waaaanf");
-    &ok("client");
-
-
-## The future...
-#    if ($HAVE_SCALAR_UTIL) {
-#	print "not " if (is_tainted($buffer));
-#	&ok("client");
-#    }
-
-    my @array = $client->getline();
-    print "not "  if (@array != 1 or $array[0] ne "Test\n");
-    &ok("client");
-
-    print "not " if ($client->getc ne "\$");
-    &ok("client");
-
-    @array = $client->getlines;
-    print "not " if (@array != 6);
-    &ok("client");
-
-    print "not " if ($array[0] != "1.04\n");
-    &ok("client");
-
-    print "not " if ($array[1] ne "4\n");
-    &ok("client");
-
-    print "not " if ($array[2] ne "y\n");
-    &ok("client");
-
-    print "not " if (join("", @array[3..5]) ne "Test\nBeaver\nBeaver\n");
-    &ok("client");
-
-    $client->close(SSL_no_shutdown => 1);
-
-    my $client_2 = new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR,
-				       PeerPort => $SSL_SERVER_PORT,
-				       SSL_reuse_ctx => $client,
-				       SSL_cipher_list => 'HIGH');
-    print "not " if (!$client_2);
-    &ok("client");
-    $buffer = <$client_2>;
-
-    $client_2->close(SSL_ctx_free => 1);
-    exit(0);
-}
-
 
 %extra_options = ($Net::SSLeay::VERSION>=1.16) ?
     (SSL_key_file => "certs/client-key.enc", SSL_passwd_cb => sub { return "opossum" }) :
@@ -179,13 +60,169 @@ my $server = new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT,
 				 %extra_options);
 
 if (!$server) {
-    print "not ok $test\n";
+    print "not ok\n";
     exit;
 }
-&ok("server");
+&ok("Server Initialization");
 
 print "not " if (!defined fileno($server));
-&ok("server");
+&ok("Server Fileno Check");
+
+
+unless (fork) {
+    close $server;
+    %extra_options = ($Net::SSLeay::VERSION>=1.16) ?
+        (SSL_key_file => "certs/server-key.enc", SSL_passwd_cb => sub { return "bluebell" },
+	 SSL_verify_callback => \&verify_sub) :
+        (SSL_key_file => "certs/server-key.pem");
+
+
+    my $client = new IO::Socket::INET(PeerAddr => $SSL_SERVER_ADDR,
+				      PeerPort => $SSL_SERVER_PORT);
+
+    print $client "Test\n";
+    (<$client> eq "This server is SSL only") || print "not ";
+    &ok("Client non-SSL connection");
+    close $client;
+
+    $client = new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR,
+				  PeerPort => $SSL_SERVER_PORT,
+				  SSL_verify_mode => 0x01,
+				  SSL_ca_file => "certs/test-ca.pem",
+				  SSL_use_cert => 1,
+				  SSL_cert_file => "certs/server-cert.pem",
+				  SSL_version => 'TLSv1',
+				  SSL_cipher_list => 'HIGH',
+				  %extra_options);
+    
+    
+    sub verify_sub {
+	my ($ok, $ctx_store, $cert, $error) = @_;
+	unless ($ok && $ctx_store && $cert && !$error) 
+	{ print("not ok #client failure\n") && exit; }
+	($cert =~ /Dummy IO::Socket::SSL/) || print "not";
+	&ok("Client Verify-sub Check");
+	return 1;
+    }
+
+
+    $client || (print("not ok #client failure\n") && exit);
+    &ok("Client Initialization");
+
+    $client->fileno() || print "not ";
+    &ok("Client Fileno Check");
+
+#    $client->untaint() if ($HAVE_SCALAR_UTIL);  # In the future...
+
+    $client->dump_peer_certificate() || print "not ";
+    &ok("Client Peer Certificate Check");
+
+    $client->peer_certificate("issuer") || print "not ";
+    &ok("Client Peer Certificate Issuer Check");
+
+    $client->get_cipher() || print "not ";
+    &ok("Client Cipher Check");
+
+    $client->syswrite('00waaaanf00', 7, 2);
+
+    if ($CAN_PEEK) {
+	my $buffer;
+	$client->read($buffer,2);
+	print "not " if ($buffer ne 'ok');
+	&ok("Client Peek Check");
+    }
+
+    $client->print("Test\n");
+    send($client, "Test\n", 0);
+    $client->printf("\$%.2f\n%d\n%c\n%s", 1.0444442342, 4.0, ord("y"), "Test\nBeaver\nBeaver\n");
+    shutdown($client, 1);
+
+    my $buffer="\0\0aaaaaaaaaaaaaaaaaaaa";
+    $client->sysread($buffer, 7, 2);
+    print "not " if ($buffer ne "\0\0waaaanf");
+    &ok("Client Sysread Check");
+
+
+## The future...
+#    if ($HAVE_SCALAR_UTIL) {
+#	print "not " if (is_tainted($buffer));
+#	&ok("client");
+#    }
+
+    my @array = $client->getline();
+    print "not "  if (@array != 1 or $array[0] ne "Test\n");
+    &ok("Client Getline Check");
+
+    print "not " if ($client->getc ne "\$");
+    &ok("Client Getc Check");
+
+    @array = $client->getlines;
+    print "not " if (@array != 6);
+    &ok("Client Getlines Check 1");
+
+    print "not " if ($array[0] != "1.04\n");
+    &ok("Client Getlines Check 2");
+
+    print "not " if ($array[1] ne "4\n");
+    &ok("Client Getlines Check 3");
+
+    print "not " if ($array[2] ne "y\n");
+    &ok("Client Getlines Check 4");
+
+    print "not " if (join("", @array[3..5]) ne "Test\nBeaver\nBeaver\n");
+    &ok("Client Getlines Check 5");
+
+    print "not " if (defined(<$client>));
+    &ok("Client Finished Reading Check");
+
+    $client->close(SSL_no_shutdown => 1);
+
+    my $client_2 = new IO::Socket::INET(PeerAddr => $SSL_SERVER_ADDR,
+					PeerPort => $SSL_SERVER_PORT);
+    
+    print "not " if (!$client_2);
+    &ok("Second Client Initialization");
+
+    $client_2 = IO::Socket::SSL->new_from_fd($client_2->fileno, '+<>',
+					     SSL_reuse_ctx => $client,
+					     SSL_cipher_list => 'HIGH');
+    print "not " if (!$client_2);
+    &ok("Client Init from Fileno Check");
+    $buffer = <$client_2>;
+
+    print "not " unless ($buffer eq "Boojums\n");
+    &ok("Client (fileno) Readline Check");
+
+    $client_2->close(SSL_ctx_free => 1);
+
+    if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
+	my $client_3 = new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR,
+					   PeerPort => $SSL_SERVER_PORT,
+					   SSL_verify_mode => 0x01,
+					   SSL_ca_file => "certs/test-ca.pem",
+					   SSL_use_cert => 1,
+					   SSL_cert_file => "certs/server-cert.pem",
+					   SSL_version => 'TLSv1',
+					   SSL_cipher_list => 'HIGH',
+					   Blocking => 0,
+					   %extra_options);
+	
+	print "not " if (!$client_3);
+	&ok("Client Nonblocking Check 1");
+	close $client_3;
+
+	my $client_4 = new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR,
+					   PeerPort => $SSL_SERVER_PORT,
+					   SSL_reuse_ctx => $client_3,
+					   Blocking => 0,
+					   SSL_cipher_list => 'HIGH');
+	print "not " if (!$client_4);
+	&ok("Client Nonblocking Check 2");
+	$client_3->close(SSL_ctx_free => 1);
+    }
+
+    exit(0);
+}
 
 my $client = $server->accept;
 
@@ -197,13 +234,13 @@ sub error_trap {
 }
 
 $error_trapped or print "not ";
-&ok("server");
+&ok("Server non-SSL Client Check");
 
 if ($client && $client->opened) {
     print "not ok # client stayed alive!\n";
     exit;
 }
-&ok("server");
+&ok("Server Kill-client Check");
 
 $client = $server->accept;
 
@@ -211,21 +248,21 @@ if (!$client) {
     print "not ok # no client\n";
     exit;
 }
-&ok("server");
+&ok("Server Client Accept Check");
 
 
 fileno($client) || print "not ";
-&ok("server");
+&ok("Server Client Fileno Check");
 
 my $buffer;
 
 if ($CAN_PEEK) {
     $client->peek($buffer, 7, 2);
     print "not " if ($buffer ne "\0\0waaaanf");
-    &ok("server");
+    &ok("Server Peek Check");
 
     print "not " if ($client->pending() != 7);
-    &ok("server");
+    &ok("Server Pending Check");
 
     print $client "ok";
 }
@@ -236,37 +273,38 @@ if ($CAN_PEEK) {
 
 sysread($client, $buffer, 7, 2);
 print "not " if ($buffer ne "\0\0waaaanf");
-&ok("server");
+&ok("Server Sysread Check");
 
 
 my @array = scalar <$client>;
 print "not "  if ($array[0] ne "Test\n");
-&ok("server");
+&ok("Server Getline Check");
 
 
 recv($client, my $recv_buffer, 5, 0);
 print "not " if ($recv_buffer ne "Test\n");
-&ok("server");
+&ok("Server Recv Check");
 
 print "not " if (getc($client) ne "\$");
-&ok("server");
+&ok("Server Getc Check");
 
 
 @array = <$client>;
 print "not " if (@array != 6);
-&ok("server");
+&ok("Server Getlines Check 1");
 
 print "not " if ($array[0] != "1.04\n");
-&ok("server");
+&ok("Server Getlines Check 2");
 
 print "not " if ($array[1] ne "4\n");
-&ok("server");
+&ok("Server Getlines Check 3");
 
 print "not " if ($array[2] ne "y\n");
-&ok("server");
+&ok("Server Getlines Check 4");
 
 print "not " if (join("", @array[3..5]) ne "Test\nBeaver\nBeaver\n");
-&ok("server");
+&ok("Server Getlines Check 5");
+
 
 syswrite($client, '00waaaanf00', 7, 2);
 print($client "Test\n");
@@ -274,19 +312,17 @@ printf $client "\$%.2f\n%d\n%c\n%s", (1.0444442342, 4.0, ord("y"), "Test\nBeaver
 
 close $client;
 
-print "Hooray!\n";
-
 $client = $server->accept || &bail;
 
 if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     $client->blocking(0);
     $client->read($buffer, 20, 0);
     print "not " if ($client->errstr() !~ /wants a read/);
-    &ok("server");
+    &ok("Server Nonblocking Check 1");
 }
 
 print "not " unless ($client->opened);
-&ok("server");
+&ok("Server Client Opened Check 1");
 
 print $client "Boojums\n";
 
@@ -294,15 +330,30 @@ close($client);
 
 ${*$client}{'_SSL_opened'} = 1;
 print "not " if ($client->opened);
-&ok("server");
+&ok("Server Client Opened Check 2");
 ${*$client}{'_SSL_opened'} = 0;
 
+
+if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
+    $client = $server->accept;
+    print "not " if (!$client->opened);
+    &ok("Server Nonblocking Check 2");
+    close $client;
+
+    $server->blocking(0);
+    my $sel = new IO::Select($server);
+    $sel->can_read(30);
+    $client = $server->accept;
+    print "not " if (!$client->opened);
+    &ok("Server Nonblocking Check 3");
+    close $client;
+}
 
 $server->close(SSL_ctx_free => 1);
 wait;
 
 sub ok {
-    print "ok #$_[0] ", ++$test, "\n"; 
+    print "ok #$_[0]\n"; 
 }
 
 sub bail {

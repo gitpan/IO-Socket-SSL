@@ -1,5 +1,22 @@
 None.  See documentation.
 
+Following are some common errors to watch out for:
+
+To use client-side session caching, you will have to apply the
+patch in the patches/ subdirectory to Net::SSLeay, or download
+the patched version at 
+
+http://www.fas.harvard.edu/~behrooz/Net_SSLeay.pm-1.26.tar.gz
+
+---------------------
+
+IO::Socket::SSL does not currently support using both IPv4 and IPv6 in
+the same program.  For a quick workaround, copy the module 'SSL.pm' to
+another named 'SSL6.pm' and adjust the package declaration
+accordingly.  Support for this feature is planned in the next release.
+
+---------------------
+
 If you plan on having IO::Socket::SSL sockets auto-close themselves
 when they go out of scope (like LWP::UserAgent expects), you will
 need to get Scalar::Util or WeakRef from CPAN (Scalar::Util comes
@@ -39,7 +56,7 @@ IO::Socket::SSL, but worked in IO::Socket::INET:
 chomp($var = <$socket>);
 print ord(chop($var));    # Prints "10" for people using ASCII
 
-This is due to a bug in Perl that will be fixed in 5.8.1.  If you need
+This is due to a bug in Perl that is fixed in 5.8.1.  If you need
 a workaround, try one of the following:
 
 chomp($var = $socket->getline());

@@ -21,8 +21,23 @@ print "1..9\n";
 IO::Socket::SSL::context_init(SSL_verify_mode => 0x01, SSL_version => 'TLSv1' );
 
 
+my $server = new IO::Socket::INET(LocalPort => $SSL_SERVER_PORT,
+	                          LocalAddr => $SSL_SERVER_ADDR,
+				  Listen => 1,
+				  Proto => 'tcp', ReuseAddr => 1, Timeout => 15);
+
+if (!$server) {
+    print "Bail out! ";
+    print("Setup of test IO::Socket::INET client and server failed.  All the rest of ",
+	  "the tests in this suite will fail also unless you change the values in ",
+	  "ssl_settings.req in the t/ directory.");
+    exit;
+}
+
+print "ok\n";
+
 unless (fork) {
-    sleep 1;
+    close $server;
     $MyClass::client = new IO::Socket::INET("$SSL_SERVER_ADDR:$SSL_SERVER_PORT");
     package MyClass;
     use IO::Socket::SSL;
@@ -41,21 +56,6 @@ unless (fork) {
     close $client;
     exit(0);
 }
-
-my $server = new IO::Socket::INET(LocalPort => $SSL_SERVER_PORT,
-	                          LocalAddr => $SSL_SERVER_ADDR,
-				  Listen => 1,
-				  Proto => 'tcp', ReuseAddr => 1, Timeout => 15);
-
-if (!$server) {
-    print "Bail out! ";
-    print("Setup of test IO::Socket::INET client and server failed.  All the rest of ",
-	  "the tests in this suite will fail also unless you change the values in ",
-	  "ssl_settings.req in the t/ directory.");
-    exit;
-}
-
-print "ok\n";
 
 my $contact = $server->accept;
 

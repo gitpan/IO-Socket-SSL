@@ -4,7 +4,7 @@ interface to SSL sockets. The class is a descendent of
 IO::Socket::INET.
 
 In order to use IO::Socket::SSL you need to have Net::SSLeay
-v1.08 or newer installed (v1.23 recommended*).  In order to use
+v1.08 or newer installed (v1.26 recommended*).  In order to use
 password callbacks, Net::SSLeay v1.16 is required.
 
 For those who do not have a built-in random number generator
@@ -16,8 +16,8 @@ If you want to bypass the test for existence of the RNG, then
 set the "SKIP_RNG_TEST" environment variable to a true value.
 
 This version has been tested with a variety of Net::SSLeay
-versions (including 1.17-1.25), OpenSSL 0.9.6c-0.9.7b,
-and Perl versions 5.005_03, 5.6.0, 5.6.1, 5.8.0, and 5.8.1-RC4.
+versions (including 1.17-1.26), OpenSSL 0.9.6c-0.9.7c,
+and Perl versions 5.005_03, 5.6.0, 5.6.1, 5.8.0, and 5.8.4.
 
 In addition to providing a general OO interface to SSL sockets,
 this package can be used with libwww-perl.
@@ -28,8 +28,18 @@ installation:
 	make test
 	make install
 
-*As of this writing, August 20, 2003.
+*As of this writing, April 30, 2004, Net::SSLeay 1.26 is
+an unofficial distribution.  Find the patch against 1.25
+in the patches/ subdirectory, or download the full tarball
+from 
+
+http://www.fas.harvard.edu/~behrooz/Net_SSLeay.pm-1.26.tar.gz
+
+I have so far been unable to contact Sampo Kellomäki about the
+patch, but hopefully the matter will be resolved by the next
+release.
+
 
 --
 Peter Behroozi, behrooz at fas.harvard.edu
-(Originally by Marko Asplund, aspa at kronodoc.fi)
+(Originally by Marko Asplund, marko.asplund at kronodoc.fi)

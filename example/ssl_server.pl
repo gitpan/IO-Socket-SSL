@@ -1,6 +1,6 @@
 #
 # a test server for testing IO::Socket::SSL-class's behavior
-# (aspa@kronodoc.fi).
+# (marko.asplund at kronodoc.fi).
 #
 # $Id: ssl_server.pl,v 1.7 2000/11/08 09:25:21 aspa Exp $.
 #
