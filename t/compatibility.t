@@ -17,14 +17,19 @@ foreach ($^O) {
 
 $SIG{'CHLD'} = "IGNORE";
 
-print "1..6\n";
-&IO::Socket::SSL::context_init( SSL_verify_mode => 0x01, SSL_version => 'TLSv1' );
+print "1..9\n";
+IO::Socket::SSL::context_init(SSL_verify_mode => 0x01, SSL_version => 'TLSv1' );
 
 
 unless (fork) {
     sleep 1;
-    my $client = new IO::Socket::INET("$SSL_SERVER_ADDR:$SSL_SERVER_PORT");
-    &IO::Socket::SSL::socketToSSL($client) || print "not ";
+    $MyClass::client = new IO::Socket::INET("$SSL_SERVER_ADDR:$SSL_SERVER_PORT");
+    package MyClass;
+    use IO::Socket::SSL;
+    @ISA = "IO::Socket::SSL";
+    MyClass->start_SSL($client) || print "not ";
+    print "ok\n";
+    (ref($client) eq "MyClass") || print "not ";
     print "ok\n";
     $client->issuer_name || print "not ";
     print "ok\n";
@@ -54,13 +59,20 @@ print "ok\n";
 
 my $contact = $server->accept;
 
-&IO::Socket::SSL::socketToSSL($contact, 
-			      {SSL_server => 1, 
-			       SSL_verify_mode => 0}) || print "not ";
+IO::Socket::SSL::socketToSSL($contact, 
+			     {SSL_server => 1, 
+			      SSL_verify_mode => 0}) || print "not ";
 print "ok\n";
 <$contact>;
 close $contact;
 close $server;
+
+bless $contact, "MyClass";
+print "not " if IO::Socket::SSL::socket_to_SSL($contact, SSL_server => 1);
+print "ok\n";
+
+print "not " unless (ref($contact) eq "MyClass");
+print "ok\n";
 
 sub bail {
 	print "Bail Out! $IO::Socket::SSL::ERROR";

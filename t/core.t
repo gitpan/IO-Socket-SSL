@@ -13,7 +13,7 @@ $OPENSSL_VERSION = 0;
 $OPENSSL_VERSION = &Net::SSLeay::OPENSSL_VERSION_NUMBER if ($NET_SSLEAY_VERSION>=1.19);
 $CAN_PEEK = ($OPENSSL_VERSION >= 0x0090601f) ? 1 : 0;
 
-$numtests = 26;
+$numtests = 29;
 $|=1;
 
 foreach ($^O) {
@@ -25,6 +25,10 @@ foreach ($^O) {
 
 if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     $numtests++;
+}
+
+if ($NET_SSLEAY_VERSION>=1.16) {
+    $numtests+=4;
 }
 
 #We can only test SSL_peek if OpenSSL is v0.9.6a or better
@@ -39,21 +43,41 @@ $test = 0;
 unless (fork) {
     sleep 1;
     %extra_options = ($Net::SSLeay::VERSION>=1.16) ?
-        (SSL_key_file => "certs/server-key.enc", SSL_passwd_cb => sub { return "bluebell" }) :
+        (SSL_key_file => "certs/server-key.enc", SSL_passwd_cb => sub { return "bluebell" },
+	 SSL_verify_callback => \&verify_sub) :
         (SSL_key_file => "certs/server-key.pem");
 
 
-    my $client = new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR,
-				     PeerPort => $SSL_SERVER_PORT,
-				     SSL_verify_mode => 0x01,
-				     SSL_ca_file => "certs/test-ca.pem",
-				     SSL_use_cert => 1,
-				     SSL_cert_file => "certs/server-cert.pem",
-				     SSL_version => 'TLSv1',
-				     SSL_cipher_list => 'HIGH',
-				     %extra_options);
+    my $client = new IO::Socket::INET(PeerAddr => $SSL_SERVER_ADDR,
+				      PeerPort => $SSL_SERVER_PORT);
 
-    $client || (print("not ok\n") && exit);
+    print $client "Test\n";
+    (<$client> eq "This server is SSL only") || print "not ";
+    &ok("client");
+    close $client;
+
+    $client = new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR,
+				  PeerPort => $SSL_SERVER_PORT,
+				  SSL_verify_mode => 0x01,
+				  SSL_ca_file => "certs/test-ca.pem",
+				  SSL_use_cert => 1,
+				  SSL_cert_file => "certs/server-cert.pem",
+				  SSL_version => 'TLSv1',
+				  SSL_cipher_list => 'HIGH',
+				  %extra_options);
+    
+    
+    sub verify_sub {
+	my ($ok, $ctx_store, $cert, $error) = @_;
+	unless ($ok && $ctx_store && $cert && !$error) 
+	{ print("not ok #client failure\n") && exit; }
+	($cert =~ /Dummy IO::Socket::SSL/) || print "not";
+	&ok("client");
+	return 1;
+    }
+
+
+    $client || (print("not ok #client failure\n") && exit);
     &ok("client");
 
     $client->fileno() || print "not ";
@@ -140,7 +164,7 @@ unless (fork) {
 
 my $server = new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT,
 				 LocalAddr => $SSL_SERVER_ADDR,
-				 Listen => 1,
+				 Listen => 2,
 				 Proto => 'tcp',
 				 Timeout => 30,
 				 ReuseAddr => 1,
@@ -150,6 +174,7 @@ my $server = new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT,
 				 SSL_cert_file => "certs/client-cert.pem",
 				 SSL_version => 'TLSv1',
 				 SSL_cipher_list => 'HIGH',
+				 SSL_error_trap => \&error_trap,
 				 %extra_options);
 
 if (!$server) {
@@ -163,8 +188,26 @@ print "not " if (!defined fileno($server));
 
 my $client = $server->accept;
 
+sub error_trap {
+    my $self = shift;
+    print $self "This server is SSL only";
+    $error_trapped = 1;
+    $self->kill_socket;
+}
+
+$error_trapped or print "not ";
+&ok("server");
+
+if ($client && $client->opened) {
+    print "not ok # client stayed alive!\n";
+    exit;
+}
+&ok("server");
+
+$client = $server->accept;
+
 if (!$client) {
-    print "not ok\n";
+    print "not ok # no client\n";
     exit;
 }
 &ok("server");

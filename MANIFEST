@@ -9,7 +9,6 @@ certs/server-key.pem
 certs/test-ca.pem
 Changes
 docs/debugging.txt
-example/daemon.pl
 example/ssl_client.pl
 example/ssl_server.pl
 Makefile.PL

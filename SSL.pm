@@ -4,10 +4,12 @@
 #    a drop-in replacement for IO::Socket::INET that encapsulates
 #    data passed over a network with SSL.
 #
-# Current Code Shepherd: Peter Behroozi, behroozi@www.pls.uni.edu
+# Current Code Shepherd: Peter Behroozi, <behrooz at fas.harvard.edu>
 #
 # The original version of this module was written by 
-# Marko Asplund, aspa@kronodoc.fi.
+# Marko Asplund, <aspa at kronodoc.fi>, who drew from
+# Crypt::SSLeay (Net::SSL) by Gisle Aas.
+#
 
 package IO::Socket::SSL;
 
@@ -20,7 +22,7 @@ use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.92';
+    $VERSION = '0.93';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -32,21 +34,20 @@ BEGIN {
     &Net::SSLeay::randomize();
 }
 
-sub import {
-    /debug(\d)/ and $DEBUG=$1 foreach (@_);
-}
+sub import {  /debug(\d)/ and $DEBUG=$1 foreach (@_);  }
 
 # You might be expecting to find a new() subroutine here, but that is
 # not how IO::Socket::INET works.  All configuration gets performed in
 # the calls to configure() and either connect() or accept().
 
 #Call to configure occurs when a new socket is made using
-#IO::Socket::INET.  Returns undef on failure.
+#IO::Socket::INET.  Returns false (empty list) on failure.
 sub configure {
     my ($self, $arg_hash) = @_;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
+    return IO::Socket::SSL->error("Undefined IO::Socket::SSL object") unless($self);
     
-    $self->configure_SSL($arg_hash) || return undef;
+    $self->configure_SSL($arg_hash) 
+	|| return;
     
     return ($self->SUPER::configure($arg_hash)
 	|| $self->error("IO::Socket::INET configuration failed"));
@@ -64,16 +65,19 @@ sub configure_SSL {
 	 'SSL_ca_path'   => 'ca/',
 	 'SSL_use_cert'  => $is_server,
 	 'SSL_verify_mode' => &Net::SSLeay::VERIFY_NONE(),
+	 'SSL_verify_callback' => 0,
+	 'SSL_check_crl' => 0,
 	 'SSL_version' => 'sslv23',
 	 'SSL_cipher_list' => 'ALL:!LOW:!EXP');
 
     #Replace nonexistant entries with defaults
     $arg_hash = { %default_args, %$GLOBAL_CONTEXT_ARGS, %$arg_hash };
+
+    #Avoid passing undef arguments to Net::SSLeay
+    !defined($arg_hash->{$_}) and ($arg_hash->{$_} = '') foreach (keys %$arg_hash);
+
     ${*$self}{'_SSL_arguments'}=$arg_hash;
-
-    ${*$self}{'_SSL_ctx'} = new IO::Socket::SSL::SSL_Context($arg_hash)
-	|| return undef;
-
+    ${*$self}{'_SSL_ctx'} = new IO::Socket::SSL::SSL_Context($arg_hash) || return;
     ${*$self}{'_SSL_opened'}=1 if ($is_server);
 
     return $self;
@@ -84,37 +88,38 @@ sub configure_SSL {
 #IO::Socket::INET
 sub connect {
     my $self = shift;
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
+    return IO::Socket::SSL->error("Undefined IO::Socket::SSL object") unless($self);
 
     my $socket = $self->SUPER::connect(@_)
-	|| return($self->error("IO::Socket::INET connect attempt failed"));
+	|| return $self->error("IO::Socket::INET connect attempt failed");
 
-    return $self->connect_SSL($socket);
+    return $self->connect_SSL($socket) || $self->fatal_ssl_error;
 }
 
 
 sub connect_SSL {
     my ($self, $socket) = @_;
     my $arg_hash = ${*$self}{'_SSL_arguments'};
+    ${*$self}{'_SSL_opened'}=1;
+
+    my $fileno = ${*$self}{'_SSL_fileno'} = $socket->fileno();
+    return $self->error("Socket has no fileno") unless (defined $fileno);
 
     my $ctx = ${*$self}{'_SSL_ctx'};  # Reference to real context
     my $ssl = ${*$self}{'_SSL_object'} = &Net::SSLeay::new($$ctx)
-	|| return($self->error("SSL-init failed"));
-
-    my $fileno = ${*$self}{'_SSL_fileno'} = $socket->fileno();
+	|| return $self->error("SSL structure creation failed");
 
     &Net::SSLeay::set_fd($ssl, $fileno)
-	|| return($self->error("SSL-setfd failed"));
+	|| return $self->error("SSL filehandle association failed");
 
     &Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
-	|| return($socket->error("Failed to set SSL cipher list"));
+	|| return $self->error("Failed to set SSL cipher list");
 
     if (&Net::SSLeay::connect($ssl)<1) {
-	return($self->error("SSL connect attempt failed"));
+	return $self->error("SSL connect attempt failed");
     }
 
     tie *{$self}, "IO::Socket::SSL::SSL_HANDLE", $self;
-    ${*$self}{'_SSL_opened'}=1;
 
     return $self;
 }
@@ -125,39 +130,39 @@ sub connect_SSL {
 sub accept {
     my $self = shift;
     my $class = shift || 'IO::Socket::SSL';
-    return IO::Socket::SSL->error("Undefined SSL object") unless($self);
+    return IO::Socket::SSL->error("Undefined IO::Socket::SSL object") unless($self);
     my $arg_hash = ${*$self}{'_SSL_arguments'};
 
-    my $socket = &IO::Socket::accept($self, 'IO::Socket::INET')
-	|| return($self->error("IO::Socket::INET accept failed"));
+    my $socket = &IO::Socket::accept($self, $class)
+	|| return $self->error("IO::Socket::INET accept failed");
 
-    bless $socket, $class;
     return ($socket->accept_SSL(${*$self}{'_SSL_ctx'}, $arg_hash)
-	    || $self->error($ERROR));
+	    || $self->error($ERROR) || $socket->fatal_ssl_error);
 }
 
 sub accept_SSL {
     my ($socket, $ctx, $arg_hash) = @_;
     ${*$socket}{'_SSL_arguments'} = { %$arg_hash, SSL_server => 0 };
     ${*$socket}{'_SSL_ctx'} = $ctx;
-
-    my $ssl = ${*$socket}{'_SSL_object'} = &Net::SSLeay::new($$ctx)
-	|| return($socket->error("SSL-init failed"));
+    ${*$socket}{'_SSL_opened'}=1;
 
     my $fileno = ${*$socket}{'_SSL_fileno'} = fileno($socket);
+    return $socket->error("Socket has no fileno") unless (defined $fileno);
+
+    my $ssl = ${*$socket}{'_SSL_object'} = &Net::SSLeay::new($$ctx)
+	|| return $socket->error("SSL structure creation failed");
 
     &Net::SSLeay::set_fd($ssl, $fileno)
-	|| return($socket->error("SSL-setfd failed"));
+	|| return $socket->error("SSL filehandle association failed");
     
     &Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
-	|| return($socket->error("Failed to set SSL cipher list"));
+	|| return $socket->error("Failed to set SSL cipher list");
 
     if (&Net::SSLeay::accept($ssl)<1) {
-	return($socket->error("SSL accept failed"));
+	return $socket->error("SSL accept failed");
     }
 
     tie *{$socket}, "IO::Socket::SSL::SSL_HANDLE", $socket;
-    ${*$socket}{'_SSL_opened'}=1;
 
     return $socket;
 }
@@ -179,16 +184,16 @@ sub generic_read {
 	$$buffer.="\0" x ($offset-length($$buffer));  #mimic behavior of read
     }
     
-    substr($$buffer, $offset+$[, length($$buffer), $data);
+    substr($$buffer, $offset, length($$buffer), $data);
     return $length;
 }
 
-sub read { 
+sub read {
     my $self = shift;
     return $self->generic_read(\&Net::SSLeay::read, @_);
 }
 
-sub peek { 
+sub peek {
     my $self = shift;
     if ($Net::SSLeay::VERSION >= 1.19 && &Net::SSLeay::OPENSSL_VERSION_NUMBER >= 0x0090601f) {
 	return $self->generic_read(\&Net::SSLeay::peek, @_);
@@ -210,7 +215,7 @@ sub write {
 
 
     my $written = &Net::SSLeay::ssl_write_all
-	($ssl, \substr($$buffer, $offset+$[, $length));
+	($ssl, \substr($$buffer, $offset, $length));
 
     return $self->error("SSL write error") if ($written<0);
     return $written;
@@ -234,8 +239,7 @@ sub print {
 }
 
 sub printf {
-    my $self = shift;
-    my $format = shift;
+    my ($self,$format) = (shift,shift);
     local $\;
     return $self->print(sprintf($format, @_));
 }
@@ -243,7 +247,7 @@ sub printf {
 sub getc {
     my $self = shift;
     my $buffer;
-    return $self->read($buffer, 1, 0) ? $buffer : undef;
+    return $self->read($buffer, 1, 0) ? $buffer : ();
 }
 
 sub readline {
@@ -287,6 +291,14 @@ sub close {
     $self->SUPER::close unless ($close_args->{_SSL_in_DESTROY});
 }
 
+sub kill_socket {
+    my $self = shift;
+    shutdown($self, 2);
+    $self->close(SSL_no_shutdown => 1) if (${*$self}{'_SSL_opened'});
+    delete(${*$self}{'_SSL_ctx'});
+    return;
+}
+
 sub fileno {
     my $self = shift;
     return ${*$self}{'_SSL_fileno'} || $self->SUPER::fileno();
@@ -294,6 +306,7 @@ sub fileno {
 
 
 ####### IO::Socket::SSL specific functions #######
+# get_ssl_object is for internal use ONLY!
 sub get_ssl_object {
     my $self = shift;
     my $ssl = ${*$self}{'_SSL_object'};
@@ -306,21 +319,21 @@ sub pending {
     return &Net::SSLeay::pending($ssl);
 }
 
+sub start_SSL {
+    my ($class,$socket) = (shift,shift);
+    return $class->error("Not a socket") unless(ref($socket));
+    my $arg_hash = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
+    my $original_class = ref($socket);
 
-sub socket_to_SSL {
-    my $socket = shift;
-    return IO::Socket::SSL->error("Not a socket") unless(ref($socket));
-    my ($arg_hash) = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
-
-    bless $socket, "IO::Socket::SSL";
-    $socket->configure_SSL($arg_hash) || return undef;
-
-    my $ssl = $socket->get_ssl_object;
+    bless $socket, $class;
+    $socket->configure_SSL($arg_hash) or bless($socket, $original_class) && return;
     $arg_hash = ${*$socket}{'_SSL_arguments'};
 
-    return $arg_hash->{'SSL_server'} ?
-	$socket->accept_SSL(${*$socket}{'_SSL_ctx'}, $arg_hash)
-	: $socket->connect_SSL($socket);
+    my $result = ($arg_hash->{'SSL_server'} ?
+		  $socket->accept_SSL(${*$socket}{'_SSL_ctx'}, $arg_hash)
+		  : $socket->connect_SSL($socket));
+
+    return $result ? $socket : bless($socket, $original_class) && ();
 }
 
 sub dump_peer_certificate {
@@ -350,11 +363,27 @@ sub get_cipher {
 
 sub errstr {
     my $self = shift;
-    return ref($self) ? ${*$self}{'_SSL_last_err'} : $ERROR;
+    return ((ref($self) ? ${*$self}{'_SSL_last_err'} : $ERROR) or '');
+}
+
+sub fatal_ssl_error {
+    my $self = shift;
+    my $error_trap = ${*$self}{'_SSL_arguments'}->{'SSL_error_trap'};
+    if (defined $error_trap and ref($error_trap) eq 'CODE') {
+	$error_trap->($self, $self->errstr()."\n".$self->get_ssleay_error());
+    } else { $self->kill_socket; }
+    return;
+}
+
+sub get_ssleay_error {
+    #Net::SSLeay will print out the errors itself unless we explicitly
+    #undefine $Net::SSLeay::trace while running print_errs()
+    local $Net::SSLeay::trace;
+    return &Net::SSLeay::print_errs('SSL error: ') || '';
 }
 
 sub error {
-    my ($self, $error) = @_;
+    my ($self, $error, $destroy_socket) = @_;
     foreach ($error) {
 	if (/ print / || / write / || / read /) {
 	    my $ssl = ${*$self}{'_SSL_object'};
@@ -369,19 +398,11 @@ sub error {
 	    }
 	}
     }
-    if ($DEBUG) {{
-	#Net::SSLeay will print out the errors itself unless we explicitly
-	#undefine $Net::SSLeay::trace while running print_errs()
-	local $Net::SSLeay::trace;
-	if (my $ssl_err = &Net::SSLeay::print_errs()) {
-	    $error.="\nSSL Error String: $ssl_err";
-	}
-	carp $error;
-    }}
+    carp $error."\n".$self->get_ssleay_error() if $DEBUG;
     ${*$self}{'_SSL_last_err'} = $error if (ref($self));
     $ERROR = $error;
-    return undef;
-}    
+    return;
+}
 
 
 sub DESTROY {
@@ -392,7 +413,8 @@ sub DESTROY {
 
 
 #######Extra Backwards Compatibility Functionality#######
-sub socketToSSL { &socket_to_SSL; }
+sub socket_to_SSL { IO::Socket::SSL->start_SSL(@_); }
+sub socketToSSL { IO::Socket::SSL->start_SSL(@_); }
 sub sysread { &IO::Socket::SSL::read; }
 sub syswrite { &IO::Socket::SSL::write; }
 sub issuer_name { return(shift()->peer_certificate("issuer")) }
@@ -405,7 +427,7 @@ sub context_init {
 
 sub opened {
     my $self = shift;
-    return (${*$self}{'_SSL_opened'});
+    return ${*$self}{'_SSL_opened'};
 }
 
 sub want_read {
@@ -480,8 +502,7 @@ sub new {
 
     my $ctx = $arg_hash->{'SSL_reuse_ctx'};
     if ($ctx) {
-	$ctx = ${*$ctx}{'_SSL_ctx'};
-	return $ctx if ($ctx);
+	return $ctx if ($ctx = ${*$ctx}{'_SSL_ctx'});
     }
 
     foreach ($arg_hash->{'SSL_version'}) {
@@ -491,16 +512,27 @@ sub new {
 	                    &Net::SSLeay::CTX_new();
     }
 
-    $ctx || return(IO::Socket::SSL->error("Context-init failed"));
+    $ctx || return IO::Socket::SSL->error("Context-init failed");
 
     &Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL());
 
-    my $verify_mode = $arg_hash->{'SSL_verify_mode'};
+    my ($verify_mode, $verify_cb) = @{$arg_hash}{'SSL_verify_mode','SSL_verify_callback'};
     unless ($verify_mode == &Net::SSLeay::VERIFY_NONE())
     {
 	&Net::SSLeay::CTX_load_verify_locations
 	    ($ctx, @{$arg_hash}{'SSL_ca_file','SSL_ca_path'}) ||
-	    return(IO::Socket::SSL->error("Invalid certificate authority locations"));
+	    return IO::Socket::SSL->error("Invalid certificate authority locations");
+    }
+
+    if ($arg_hash->{'SSL_check_crl'}) {
+	if (&Net::SSLeay::OPENSSL_VERSION_NUMBER >= 0x0090702f) 
+	{
+	    &Net::SSLeay::X509_STORE_CTX_set_flags
+		(&Net::SSLeay::CTX_get_cert_store($ctx),
+		 &Net::SSLeay::X509_V_FLAG_CRL_CHECK);
+	} else {
+	    return IO::Socket::SSL->error("CRL not supported for OpenSSL versions less than 0.9.7b");
+	}
     }
 
     if ($arg_hash->{'SSL_server'} || $arg_hash->{'SSL_use_cert'}) {
@@ -508,7 +540,7 @@ sub new {
 
 	if ($arg_hash->{'SSL_passwd_cb'}) {
 	    if ($Net::SSLeay::VERSION < 1.16) {
-		return(IO::Socket::SSL->error("Password callbacks are not supported for Net::SSLeay < v1.16"));
+		return IO::Socket::SSL->error("Password callbacks are not supported for Net::SSLeay < v1.16");
 	    } else {
 		&Net::SSLeay::CTX_set_default_passwd_cb
 		    ($ctx, $arg_hash->{'SSL_passwd_cb'});
@@ -517,14 +549,28 @@ sub new {
 
 	&Net::SSLeay::CTX_use_PrivateKey_file
 	    ($ctx, $arg_hash->{'SSL_key_file'}, $filetype)
-	    || return(IO::Socket::SSL->error("Failed to open Private Key"));
+	    || return IO::Socket::SSL->error("Failed to open Private Key");
 
 	&Net::SSLeay::CTX_use_certificate_file
 	    ($ctx, $arg_hash->{'SSL_cert_file'}, $filetype)
-	    || return(IO::Socket::SSL->error("Failed to open Certificate"));
+	    || return IO::Socket::SSL->error("Failed to open Certificate");
     }
 
-    &Net::SSLeay::CTX_set_verify($ctx, $verify_mode, 0);
+    my $verify_callback = $verify_cb && 
+	sub {
+	    my ($ok, $ctx_store) = @_;
+	    my ($cert, $error);
+	    if ($ctx_store) {
+		$cert = &Net::SSLeay::X509_STORE_CTX_get_current_cert($ctx_store);
+		$error = &Net::SSLeay::X509_STORE_CTX_get_error($ctx_store);
+		$cert &&= &Net::SSLeay::X509_NAME_oneline(&Net::SSLeay::X509_get_issuer_name($cert)).
+		    &Net::SSLeay::X509_NAME_oneline(&Net::SSLeay::X509_get_subject_name($cert));
+		$error &&= &Net::SSLeay::ERR_error_string($error);
+	    }
+	    return $verify_cb->($ok, $ctx_store, $cert, $error);
+	};
+    
+    &Net::SSLeay::CTX_set_verify($ctx, $verify_mode, $verify_callback);
     
     return bless \$ctx, $class;
 }
@@ -572,8 +618,9 @@ extra bonus, it works perfectly with mod_perl.
 If you have never used SSL before, you should read the appendix labelled 'Using SSL'
 before attempting to use this module.
 
-If you have used this module before, read on, as versions 0.90 and above
-represent a complete rewrite of the IO::Socket::SSL internals.
+If you have used this module before, read on, as versions 0.93 and above
+have several changes from the previous IO::Socket::SSL versions (especially
+see the note about return values).
 
 
 =head1 METHODS
@@ -615,7 +662,7 @@ only need a certificate and key if you are setting up a server.
 If your RSA private key is not in default place (F<certs/server-key.pem> for servers,
 F<certs/client-key.pem> for clients), then this is the option that you would use to
 specify a different location.  Keys should be PEM formatted, and if they are
-encrypted, you will be prompted to enter a password before the socket is formed 
+encrypted, you will be prompted to enter a password before the socket is formed
 (unless you specified the SSL_passwd_cb option).
 
 =item SSL_cert_file
@@ -655,6 +702,25 @@ This option sets the verification mode for the peer certificate.  The default
 verification if no peer certificate exists; ignored for clients), and 0x04 
 (verify client once) to change the default.
 
+=item SSL_verify_callback
+
+If you want to verify certificates yourself, you can pass a sub reference along
+with this parameter to do so.  When the callback is called, it will be passed:
+1) a true/false value that indicates what OpenSSL thinks of the certificate,
+2) a C-style memory address of the certificate store,
+3) a string containing the certificate's issuer attributes and owner attributes, and
+4) a string containing any errors encountered (0 if no errors).
+The function should return 1 or 0, depending on whether it thinks the certificate
+is valid or invalid.  The default is to let OpenSSL do all of the busy work.
+
+=item SSL_check_crl
+
+If you want to verify that the peer certificate has not been revoked by the
+signing authority, set this value to true.  OpenSSL will search for the CRL
+in your SSL_ca_path.  See the Net::SSLeay documentation for more details.
+Note that this functionality appears to be broken with OpenSSL < 0.9.7b,
+so its use with lower versions will result in an error.
+
 =item SSL_reuse_ctx
 
 If you have already set the above options (SSL_use_cert through SSL_verify_mode;
@@ -663,6 +729,16 @@ IO::Socket::SSL, then you can reuse the SSL context of that instance by passing
 it as the value for the SSL_reuse_ctx parameter.  If you pass any context-related options,
 they will be ignored.  Note that contrary to previous versions
 of IO::Socket::SSL, a global SSL context will not be implicitly used.
+
+=item SSL_error_trap
+
+When using the accept() or connect() methods, it may be the case that the
+actual socket connection works by the SSL negotiation fails, as in the case of
+an HTTP client connecting to an HTTPS server.  Passing a subroutine ref attached
+to this parameter allows you to gain control of this socket instead of having it
+be forcibly closed.  The subroutine, if called, will be passed two parameters: 
+a reference to the socket on which the SSL negotiation failed and and the full
+text of the error message.
 
 =back
 
@@ -734,12 +810,15 @@ C<SSL wants a read first!> or C<SSL wants a write first!> meaning that the other
 is expecting to read from or write to the socket and wants to be satisfied before you
 get to do anything.
 
-=item B<IO::Socket::SSL::socket_to_SSL($socket, ... )>
+=item B<IO::Socket::SSL->start_SSL($socket, ... )>
 
 This will convert a glob reference or a socket that you provide to an IO::Socket::SSL
 object.  You may also pass parameters to specify context or connection options as with
 a call to new().  If you are using this function on an accept()ed socket, you must
-set the parameter "SSL_server" to 1, i.e. IO::Socket::SSL::socket_to_SSL($socket, SSL_server => 1).
+set the parameter "SSL_server" to 1, i.e. IO::Socket::SSL->start_SSL($socket, SSL_server => 1).
+If you have a class that inherits from IO::Socket::SSL and you want the $socket to be blessed
+into your own class instead, use MyClass->start_SSL($socket) to achieve the desired effect.
+Note that if start_SSL() fails in SSL negotiation, $socket will remain blessed in its original class.
 
 =back
 
@@ -761,6 +840,17 @@ will emit a large CROAK() if you are silly enough to use them:
 =item fdopen
 
 =back
+
+
+=head1 RETURN VALUES
+
+A few changes have gone into IO::Socket::SSL v0.93 and later with respect to
+return values.  The behavior on success remains unchanged, but for I<all> functions,
+the return value on error is now an empty list.  Therefore, the return value will be
+false in all contexts, but those who have been using the return values as arguments
+to subroutines (like C<mysub(new IO::Socket::SSL(...), ...)>) may run into problems.
+The moral of the story: I<always> check the return values of these functions before
+using them in any way that you consider meaningful.
 
 
 =head1 DEBUGGING
@@ -805,8 +895,8 @@ See the 'example' directory.
 
 I have never shipped a module with a known bug, and IO::Socket::SSL is no
 different.  If you feel that you have found a bug in the module and you are
-using the latest version of Net::SSLeay, send an email immediately to 
-behroozi@www.pls.uni.edu with a subject of 'IO::Socket::SSL Bug'.  I am 
+using the latest versions of Net::SSLeay and OpenSSL, send an email immediately to 
+<behrooz at fas.harvard.edu> with a subject of 'IO::Socket::SSL Bug'.  I am 
 I<not responsible> for problems in your code, so make sure that an example
 actually works before sending it. It is merely acceptable if you send me a bug 
 report, it is better if you send a small chunk of code that points it out,
@@ -818,8 +908,7 @@ next day on CPAN. Otherwise, it could take weeks . . .
 
 IO::Socket::SSL uses Net::SSLeay as the shiny interface to OpenSSL, which is
 the shiny interface to the ugliness of SSL.  As a result, you will need both Net::SSLeay
-(1.20 recommended) and OpenSSL (0.9.6g recommended) on your computer before
-using this module.
+and OpenSSL on your computer before using this module.
 
 =head1 DEPRECATIONS
 
@@ -832,9 +921,9 @@ The following functions are deprecated and are only retained for compatibility:
 (use the SSL_reuse_ctx option if you want to re-use a context)
 
 
-=item socketToSSL() 
+=item socketToSSL() and socket_to_SSL()
 
-(renamed to socket_to_SSL())
+(use IO::Socket::SSL->start_SSL() instead)
 
 
 =item get_peer_certificate() and friends 
@@ -869,13 +958,13 @@ IO::Socket::INET, Net::SSLeay.
 
 =head1 AUTHORS
 
-Peter Behroozi, behroozi@www.pls.uni.edu.
+Peter Behroozi, <behroozi at fas.harvard.edu>
 
-Marko Asplund, aspa@kronodoc.fi, was the original author of IO::Socket::SSL.
+Marko Asplund, <aspa at kronodoc.fi>, was the original author of IO::Socket::SSL.
 
 =head1 COPYRIGHT
 
-The rewrite of this module is Copyright (C) 2002 Peter Behroozi.
+The rewrite of this module is Copyright (C) 2002-2003 Peter Behroozi.
 
 This module is Copyright (C) 1999-2002 Marko Asplund.
 
@@ -898,7 +987,7 @@ with SSL, you have to use certificates.  A certificate closely resembles a
 Government-issued ID (at least in places where you can trust them).  The ID contains some sort of
 identifying information such as a name and address, and is usually stamped with a seal
 of Government Approval.  Theoretically, this means that you may trust the information on
-the card and do business with the owner of the card.  The ideas apply to SSL certificates,
+the card and do business with the owner of the card.  The same ideas apply to SSL certificates,
 which have some identifying information and are "stamped" [most people refer to this as
 I<signing> instead] by someone (a Certificate Authority) who you trust will adequately 
 verify the identifying information.  In this case, because of some clever number theory,
