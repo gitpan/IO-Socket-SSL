@@ -22,7 +22,7 @@ use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.93';
+    $VERSION = '0.94';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -34,7 +34,9 @@ BEGIN {
     &Net::SSLeay::randomize();
 }
 
-sub import {  /debug(\d)/ and $DEBUG=$1 foreach (@_);  }
+sub import { foreach (@_) { @ISA=qw(IO::Socket::INET), next if /inet4/i;
+			    @ISA=qw(IO::Socket::INET6), next if /inet6/i;
+			    $DEBUG=$1 if /debug(\d)/; }}
 
 # You might be expecting to find a new() subroutine here, but that is
 # not how IO::Socket::INET works.  All configuration gets performed in
@@ -45,10 +47,10 @@ sub import {  /debug(\d)/ and $DEBUG=$1 foreach (@_);  }
 sub configure {
     my ($self, $arg_hash) = @_;
     return IO::Socket::SSL->error("Undefined IO::Socket::SSL object") unless($self);
-    
-    $self->configure_SSL($arg_hash) 
+
+    $self->configure_SSL($arg_hash)
 	|| return;
-    
+
     return ($self->SUPER::configure($arg_hash)
 	|| $self->error("IO::Socket::INET configuration failed"));
 }
@@ -133,7 +135,7 @@ sub accept {
     return IO::Socket::SSL->error("Undefined IO::Socket::SSL object") unless($self);
     my $arg_hash = ${*$self}{'_SSL_arguments'};
 
-    my $socket = &IO::Socket::accept($self, $class)
+    my $socket = $self->SUPER::accept($class)
 	|| return $self->error("IO::Socket::INET accept failed");
 
     return ($socket->accept_SSL(${*$self}{'_SSL_ctx'}, $arg_hash)
@@ -154,7 +156,7 @@ sub accept_SSL {
 
     &Net::SSLeay::set_fd($ssl, $fileno)
 	|| return $socket->error("SSL filehandle association failed");
-    
+
     &Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
 	|| return $socket->error("Failed to set SSL cipher list");
 
@@ -183,7 +185,7 @@ sub generic_read {
     if ($offset>length($$buffer)) {
 	$$buffer.="\0" x ($offset-length($$buffer));  #mimic behavior of read
     }
-    
+
     substr($$buffer, $offset, length($$buffer), $data);
     return $length;
 }
@@ -447,7 +449,7 @@ sub getlines { if (wantarray()) { return(shift->readline()) }
 	       else { croak("Use of getlines() not allowed in scalar context\n");  }}
 
 #Useless IO::Handle functionality
-sub truncate { croak("Use of truncate() not allowed with SSL\n") } 
+sub truncate { croak("Use of truncate() not allowed with SSL\n") }
 sub stat { croak("Use of stat() not allowed with SSL\n") }
 sub ungetc { croak("Use of ungetc() not supported with this version of IO::Socket::SSL") }
 sub setbuf { croak("Use of setbuf() not allowed with SSL\n") }
@@ -569,9 +571,9 @@ sub new {
 	    }
 	    return $verify_cb->($ok, $ctx_store, $cert, $error);
 	};
-    
+
     &Net::SSLeay::CTX_set_verify($ctx, $verify_mode, $verify_callback);
-    
+
     return bless \$ctx, $class;
 }
 
@@ -626,9 +628,9 @@ see the note about return values).
 =head1 METHODS
 
 IO::Socket::SSL inherits its methods from IO::Socket::INET, overriding them
-as necessary.  If there is an SSL error, the method (or operation) will return an
-undefined value.  The methods that have changed from the perspective of the user are
-re-documented here:
+as necessary.  If there is an SSL error, the method or operation will return an
+empty list (false in all contexts).  The methods that have changed from the 
+perspective of the user are re-documented here:
 
 =over 4
 
@@ -670,7 +672,7 @@ encrypted, you will be prompted to enter a password before the socket is formed
 If your SSL certificate is not in the default place (F<certs/server-cert.pem> for servers,
 F<certs/client-cert.pem> for clients), then you should use this option to specify the 
 location of your certificate.  Note that a key and certificate are only required for an
-SSL server, so you do not need to bother with these trifling options should you be 
+SSL server, so you do not need to bother with these trifling options should you be
 setting up an unauthenticated client.
 
 =item SSL_passwd_cb
@@ -724,11 +726,11 @@ so its use with lower versions will result in an error.
 =item SSL_reuse_ctx
 
 If you have already set the above options (SSL_use_cert through SSL_verify_mode;
-this does not include SSL_cipher_list yet) for a previous instance of 
+this does not include SSL_cipher_list yet) for a previous instance of
 IO::Socket::SSL, then you can reuse the SSL context of that instance by passing
 it as the value for the SSL_reuse_ctx parameter.  If you pass any context-related options,
-they will be ignored.  Note that contrary to previous versions
-of IO::Socket::SSL, a global SSL context will not be implicitly used.
+they will be ignored.  Note that, contrary to versions of IO::Socket::SSL below v0.90,
+a global SSL context will not be implicitly used.
 
 =item SSL_error_trap
 
@@ -810,7 +812,7 @@ C<SSL wants a read first!> or C<SSL wants a write first!> meaning that the other
 is expecting to read from or write to the socket and wants to be satisfied before you
 get to do anything.
 
-=item B<IO::Socket::SSL->start_SSL($socket, ... )>
+=item B<< IO::Socket::SSL->start_SSL($socket, ... ) >>
 
 This will convert a glob reference or a socket that you provide to an IO::Socket::SSL
 object.  You may also pass parameters to specify context or connection options as with
@@ -851,6 +853,16 @@ false in all contexts, but those who have been using the return values as argume
 to subroutines (like C<mysub(new IO::Socket::SSL(...), ...)>) may run into problems.
 The moral of the story: I<always> check the return values of these functions before
 using them in any way that you consider meaningful.
+
+
+=head1 IPv6
+
+Support for IPv6 with IO::Socket::SSL is highly experimental, as none of the author's
+machines use IPv6 and hence he cannot test IO::Socket::SSL with them.  However, if
+you consider yourself sufficiently ready for bug-reporting, pass the 'inet6' option
+to IO::Socket::SSL when calling it (i.e. C<use IO::Socket::SSL qw(inet6);>).  You will
+need IO::Socket::INET6 to use this option.  If you absolutely do not want to use this
+(or want a quick change back to IPv4), pass the 'inet4' option instead.
 
 
 =head1 DEBUGGING
@@ -954,11 +966,11 @@ The following classes have been removed:
 
 =head1 SEE ALSO
 
-IO::Socket::INET, Net::SSLeay.
+IO::Socket::INET, IO::Socket::INET6, Net::SSLeay.
 
 =head1 AUTHORS
 
-Peter Behroozi, <behroozi at fas.harvard.edu>
+Peter Behroozi, <behrooz at fas.harvard.edu> (Note the lack of an "i" at the end of "behrooz")
 
 Marko Asplund, <aspa at kronodoc.fi>, was the original author of IO::Socket::SSL.
 

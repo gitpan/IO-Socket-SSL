@@ -1,6 +1,6 @@
 #!perl -w
 # Before `make install' is performed this script should be runnable with
-# `make test'. After `make install' it should work as `perl t/compatibility.t'
+# `make test'. After `make install' it should work as `perl t/core.t'
 
 use Net::SSLeay;
 use IO::Socket::SSL;

@@ -32,4 +32,4 @@ Any function that returns the value of <$socket> (in scalar context)
 unchanged will work.
 
 -- 
-Peter Behroozi (behroozi at www.pls.uni.edu)
+Peter Behroozi (behrooz at fas.harvard.edu)

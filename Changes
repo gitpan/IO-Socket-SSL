@@ -1,4 +1,14 @@
-v0.93
+v0.94
+	- Changed accept() to use inherited accept() instead of 
+	  IO::Socket::accept, so that IPv6 inheritance is possible.
+	- Added options to import() so that a user could specify
+	  IPv6 or IPv4 mode of operation.
+	- Documentation fixes, esp. e-mail address.
+
+
+--- Old Versions --------------------------------------------------
+
+v0.93  2003.6.24
 	- Fixed error-checking slip in connect_SSL() (Problem found by
 	  Uri Guttman <uri at stemsystems.com>).
 	- All functions now return the empty list () on errors.
@@ -31,9 +41,6 @@ v0.93
 	  <gbarr at pobox.com>)
 	- Removed the daemon.pl example, as it did not work with the
 	  standard distribution of HTTP::Daemon.
-
-
---- Old Versions --------------------------------------------------
 
 v0.92   2002.10.22
 	- Changed the fileno() function to support returning the fileno
