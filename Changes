@@ -1,5 +1,12 @@
 
-v0.78
+v0.79
+	- angle bracket readline operator support
+	  (David Darville <david@dark.x.dtu.dk>).
+	- eliminate warnings in choosing SSL protocol version.
+	- implement our own opened method and make length parameter optional
+	  in syswrite (Robert Bihlmeyer <robbe@orcus.priv.at>).
+
+v0.78	20010424
 	- test script targets changed, certificate setup fixed
 	- support for TLS in SSL_version. SSL_version parameter values
 	  changed from integer to string. NB: this is an incompatible change.
@@ -13,8 +20,7 @@ v0.78
 	- include the Apache CA bundle file in the distribution (my-ca.pem).
 	- BUGS file added.
 
-v0.77
-	20010115
+v0.77	20010115
 	- don't setup SSL CA verification unless cert verification is
 	  actually used for the connections.
 	- default SSL protocol version selection in SSL.pm.

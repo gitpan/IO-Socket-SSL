@@ -6,7 +6,7 @@
 
   calling these functions on self-tied filehandles has been reported to fail
   at least on RedHat v6.x based linux systems with:
-	perl v5.6.0		- 'make test' dumps core
+	perl v5.6.0		- 'make test' (perl -w) dumps core 
 	perl v5.005_03		- ok
 	perl prior to v5.005_03 - endless loop
 

@@ -2,12 +2,12 @@
 # a test client for testing IO::Socket::SSL's behavior
 # with tied filehandles (aspa@kronodoc.fi).
 #
-# $Id: fh-test.t,v 1.9 2001/04/24 06:44:38 aspa Exp $.
+# $Id: fh-test.t,v 1.10 2001/05/10 11:02:54 aspa Exp $.
 #
 
 use IO::Socket::SSL;
 
-print "1..3\n";
+print "1..4\n";
 
 my $debug = $ARGV[0] || "";
 if($debug eq "DEBUG") { $IO::Socket::SSL::DEBUG = 1; }
@@ -42,7 +42,7 @@ sub ssl_fh_test {
     print "ok\n";
   }
 
-  $r = read $sock, $buf, 5000, 0;
+  $r = read $sock, $buf, 500, 0;
   
   if(! defined $r) {
     print "not ok\n";
@@ -52,6 +52,17 @@ sub ssl_fh_test {
   }
 
   print STDERR "buf: '$buf'\n" if ($IO::Socket::SSL::DEBUG);
+
+  @r = <$sock>;
+  
+  if (! @r) {
+    print "not ok\n";
+    exit(0);
+  } else {
+    print "ok\n";
+  }
+
+  print STDERR "\n\n\@r: '@r'\n" if ($IO::Socket::SSL::DEBUG);
   
   close($sock);
 }

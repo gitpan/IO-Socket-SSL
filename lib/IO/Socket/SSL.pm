@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.29 2001/04/24 06:41:55 aspa Exp $.
+# $Id: SSL.pm,v 1.35 2001/06/04 07:52:53 aspa Exp $.
 #
 
 #
@@ -44,7 +44,7 @@ use Net::SSLeay;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.78';
+$IO::Socket::SSL::VERSION = '0.79';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -199,6 +199,7 @@ sub connect {
     my $err_str = $self->_get_SSL_err_str();    
     return $self->_myerror("SSL_connect: '$err_str'.");
   }
+  ${*$self}{'_opened'} = 1;
 
   return $self;
 }
@@ -238,6 +239,7 @@ sub accept {
 
   print STDERR "accept: self: $self, newsock: $newsock, fileno: $fileno.\n"
     if $IO::Socket::SSL::DEBUG;
+  ${*$newsock}{'_opened'} = 1;
   return $newsock;
 }
 
@@ -250,13 +252,13 @@ sub accept {
 # ***** syswrite
 
 sub syswrite {
-  if( (@_ != 3) && (@_ != 4) ) {
-    croak '$fh->syswrite(BUF, LEN [, OFFSET])';
+  if( (@_ < 2) || (@_ > 4) ) {
+    croak '$fh->syswrite(BUF [, LEN [, OFFSET]])';
    }
 
   my $self = shift;
   my $buf = shift;
-  my $arg_len = shift;
+  my $arg_len = shift || length $buf;
   my $offset = shift || 0;
 
   my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
@@ -334,6 +336,25 @@ sub sysread {
   return $read_len;
 }
 
+# ***** readline
+
+sub readline {
+  my $self = shift;
+      
+  my $ssl_obj = ${*$self}{'_SSL_SSL_obj'};
+  my $ssl = $ssl_obj->get_ssl_handle();
+
+  if (wantarray()) { # list context
+    my (@got, $got);
+    while ($got = Net::SSLeay::ssl_read_until($ssl)) { push @got, $got; }
+    return @got;
+  }
+  else { # scalar or void context
+    my $got = Net::SSLeay::ssl_read_until($ssl);
+    return ($got eq '')?undef:$got;
+  }
+}
+
 
 # ***** print
 
@@ -378,9 +399,14 @@ sub close {
   #     on my linux system.
   #my $prev = untie(*$self);
   #return $self->SUPER::close();
+  ${*$self}{'_opened'} = 0;
   return 1;
 }
 
+sub opened {
+  my $self = shift;
+  return ${*$self}{'_opened'};
+}
 
 # **** FILENO
 
@@ -502,8 +528,6 @@ sub stat { shift->_unsupported("stat"); }
 sub ungetc { shift->_unsupported("ungetc"); }
 sub setbuf { shift->_unsupported("setbuf"); }
 sub setvbuf { shift->_unsupported("setvbuf"); }
-
-sub readline { shift->_unsupported("readline"); }
 
 
 # ***** unimplemented methods.
@@ -674,18 +698,24 @@ sub new {
       $args->{'SSL_verify_mode'} : $DEFAULT_VERIFY_MODE;
   $use_cert = $args->{'SSL_use_cert'} || $DEFAULT_USE_CERT;
 
+  # choose SSL protocol version to be used.
   my $CTX_constructor = undef;
   my $ssl_version = $args->{'SSL_version'} || $DEFAULT_SSL_VERSION;
-  if($ssl_version eq "sslv2" ) {
-    $CTX_constructor = \&Net::SSLeay::CTX_v2_new;
-    print STDERR "using SSLv2\n" if($IO::Socket::SSL::DEBUG);
-  } elsif ($ssl_version eq "sslv3" ) {
-    $CTX_constructor = \&Net::SSLeay::CTX_v3_new;
-    print STDERR "using SSLv3\n" if($IO::Socket::SSL::DEBUG);
-  } elsif ($ssl_version eq "tlsv1") {
-    $CTX_constructor = \&Net::SSLeay::CTX_tlsv1_new;
-    print STDERR "using TLSv1\n" if($IO::Socket::SSL::DEBUG);
-  } else { # SSL v23
+  if($ssl_version) {
+    if($ssl_version eq "sslv2" ) {
+      $CTX_constructor = \&Net::SSLeay::CTX_v2_new;
+      print STDERR "using SSLv2\n" if($IO::Socket::SSL::DEBUG);
+    } elsif ($ssl_version eq "sslv3" ) {
+      $CTX_constructor = \&Net::SSLeay::CTX_v3_new;
+      print STDERR "using SSLv3\n" if($IO::Socket::SSL::DEBUG);
+    } elsif ($ssl_version eq "tlsv1") {
+      $CTX_constructor = \&Net::SSLeay::CTX_tlsv1_new;
+      print STDERR "using TLSv1\n" if($IO::Socket::SSL::DEBUG);
+    } else { # SSL v23
+      ;
+    }
+  }
+  if(!$ssl_version || !$CTX_constructor) { # default to SSL v23
     print STDERR "using SSLv2/3\n" if($IO::Socket::SSL::DEBUG);
     $CTX_constructor = \&Net::SSLeay::CTX_new;
   }
