@@ -1,4 +1,8 @@
 
+v0.76	20001117
+	- patch from Kwok Chern Yue <chernyue@post1.com> for
+	  making IO::Socket::SSL work with HTTP::Daemon.
+
 v0.75	20000726
 	- IO::Socket::SSL should now work with perl v5.6.0
 	- demo/*.pl and t/*.t now turn module debugging on if

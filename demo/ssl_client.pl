@@ -1,8 +1,8 @@
 #
 # a test client for testing IO::Socket::SSL-class's behavior
-# (aspa@hip.fi).
+# (aspa@kronodoc.fi).
 #
-# $Id: ssl_client.pl,v 1.4 2000/07/25 07:59:54 aspa Exp $.
+# $Id: ssl_client.pl,v 1.5 2000/11/08 09:25:42 aspa Exp $.
 #
 
 

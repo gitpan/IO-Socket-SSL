@@ -1,7 +1,7 @@
 #
-# test HTTP::Daemon with IO::Socket::SSL (aspa@hip.fi).
+# test HTTP::Daemon with IO::Socket::SSL (aspa@kronodoc.fi).
 #
-# $Id: daemon.pl,v 1.2 2000/08/08 06:35:59 aspa Exp $.
+# $Id: daemon.pl,v 1.3 2000/11/08 09:24:56 aspa Exp $.
 #
 
 # NB: to use this demo script HTTP::Daemon and
@@ -28,7 +28,6 @@ print "Please contact me at: <URL:", $d->url, ">\n";
 while (my $c = $d->accept) {
   while (my $r = $c->get_request) {
     if ($r->method eq 'GET' and $r->url->path eq "/xyzzy") {
-      # remember, this is *not* recommened practice :-)
       $c->send_file_response("/etc/hosts");
     } else {
       $c->send_error(RC_FORBIDDEN)

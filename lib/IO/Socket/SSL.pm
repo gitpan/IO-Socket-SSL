@@ -7,7 +7,7 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL.pm,v 1.14 2000/07/26 06:31:11 aspa Exp aspa $.
+# $Id: SSL.pm,v 1.17 2000/11/17 14:17:16 aspa Exp $.
 #
 
 #
@@ -44,7 +44,7 @@ use Net::SSLeay;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.75';
+$IO::Socket::SSL::VERSION = '0.76';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -115,7 +115,7 @@ sub context_init {
 # ------ listen/connect
 
 sub new {
-  my $class = shift;
+  my $class = shift || "IO::Socket::SSL";
 
   my $self;
   if( !($self = $class->SUPER::new(@_)) ) {
@@ -123,8 +123,8 @@ sub new {
   }
   ${*$self}{'_fileno'} = fileno($self);
 
-  bless $self, "IO::Socket::SSL";
-  my $tiedhandle = tie *{$self}, "IO::Socket::SSL", $self;
+  bless $self, $class;
+  my $tiedhandle = tie *{$self}, $class, $self;
 
   return $tiedhandle;
 }
@@ -209,6 +209,7 @@ sub connect {
 #
 sub accept {
   my $self = shift;
+  my $class = shift || "IO::Socket::SSL";
   my ($newsock, $r, $ssl_obj);
 
   my $args = ${*$self}{'_arguments'};
@@ -231,8 +232,9 @@ sub accept {
   }
 
   # make $newsock a IO::Socket::SSL object and tie it.
-  bless $newsock, "IO::Socket::SSL";
-  my $tiedhandle = tie *{$newsock}, "IO::Socket::SSL", $newsock;
+  bless $newsock, $class;
+  my $tiedhandle = tie *{$newsock}, $class, $newsock;
+
 
   print STDERR "accept: self: $self, newsock: $newsock, fileno: $fileno.\n"
     if $IO::Socket::SSL::DEBUG;
