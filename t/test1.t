@@ -1,7 +1,7 @@
 #
 # a test client for testing IO::Socket::SSL's behavior (aspa@hip.fi).
 #
-# $Id: test1.t,v 1.5 1999/07/22 20:10:09 aspa Exp $.
+# $Id: test1.t,v 1.2 2000/07/04 11:26:14 aspa Exp $.
 #
 
 use IO::Socket::SSL;
@@ -11,7 +11,7 @@ my ($v_mode, $sock);
 
 print "1..4\n";
 
-if(!($sock = IO::Socket::SSL->new( PeerAddr => 'www.hip.fi',
+if(!($sock = IO::Socket::SSL->new( PeerAddr => 'www.helsinki.fi',
 			    PeerPort => '443',
 			    Proto    => 'tcp',
 			    SSL_verify_mode => 0x01,
@@ -42,7 +42,7 @@ while ( ($r = $sock->read($buf, 1, $cnt)) && ($cnt < 154) ) {
 }
 if($r && $cnt) { print "ok\n"; } else { print "not ok\n"; }
 
-#print STDERR "read bytes: cnt = '$cnt'.\n";
+#print STDERR "read bytes: cnt = '$cnt'.\n'$buf'\n";
 
 # read the rest of the input.
 while ( ($r = $sock->read($buf, 1, $cnt)) ) {

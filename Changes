@@ -1,0 +1,8 @@
+
+v0.74	20000705
+	- Changes file added
+	- bugfix in IO::Socket::SSL::sysread() (zliu2@acsu.buffalo.edu)
+	- libwww-perl and IO::Socket::SSL UML models added in docs
+	- URL changes in test scripts
+	- preliminary support for startTLS in IO::Socket::SSL::socketToSSL()
+	- miscellanous patches for Net::SSLeay added in diffs

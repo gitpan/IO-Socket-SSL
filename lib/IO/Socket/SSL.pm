@@ -7,13 +7,13 @@
 # by Gisle Aas.
 # 
 #
-# $Id: SSL_NetSSLeay.pm,v 1.5 1999/07/29 13:40:57 aspa Exp $.
+# $Id: SSL.pm,v 1.2 2000/07/04 11:24:02 aspa Exp $.
 #
 
 #
 # prerequisites: 
 #  - Net_SSLeay-1.03 (CPAN).
-#  - OpenSSL v0.9.1c (ftp.openssl.org).
+#  - OpenSSL v0.9.1c (ftp://ftp.openssl.org/).
 #
 
 # Notes:
@@ -43,7 +43,7 @@ use Net::SSLeay;
 use IO::Socket;
 
 
-$IO::Socket::SSL::VERSION = '0.73';
+$IO::Socket::SSL::VERSION = '0.74';
 @IO::Socket::SSL::ISA = qw(IO::Socket::INET);
 
 
@@ -313,8 +313,7 @@ sub sysread {
   if(!defined($_[1])) { $_[1] = ""; } # initialize uninitialized buffer.
   my $buffer_len = length($_[1]);
   my $start = ($offset >= 0) ? $offset : $buffer_len + $offset;
-  my $elen = (($start + $read_len) > $buffer_len) ?
-    $buffer_len - $start : $read_len;
+  my $elen = $buffer_len - $start;
 
   # IO::Scalar might be handy with buffer handling.
   if ( ($start >= 0) && ($start <= $buffer_len) ) {
@@ -371,6 +370,36 @@ sub close {
   return $self->SUPER::close();
 }
 
+
+# ***** socketToSSL
+
+# preliminary support for startTLS.
+sub socketToSSL {
+  my $sock = shift;
+  my $r;
+
+  if(!$sock) {
+    croak 'usage: IO::Socket::SSL::socketToSSL(socket)';
+  }
+
+  # transform IO::Socket::INET to IO::Socket::SSL.
+
+  # create an SSL object.
+  my $ssl_obj;
+  if( ! ($ssl_obj = SSL_SSL->new($sock, {})) ) {
+    return undef; # can't create SSL_SSL.
+  }
+  $ {*$sock} {'_SSL_SSL_obj'} = $ssl_obj;
+
+  my $ssl = $ssl_obj->get_ssl_handle();
+  if ( ($r = Net::SSLeay::connect($ssl)) <= 0 ) { # ssl/s23_clnt.c
+    my $err_str = IO::Socket::SSL::_get_SSL_err_str();
+    return undef; # SSL_connect failed.
+  }
+  bless $sock, "IO::Socket::SSL";
+  
+  return $sock;
+}
 
 # ***** get_verify_mode
 
@@ -494,7 +523,6 @@ sub _get_SSL_err_str {
 }
 
 1;
-
 
 #
 # ******************** SSL_SSL class ********************

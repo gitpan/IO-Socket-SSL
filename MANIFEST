@@ -1,4 +1,5 @@
 MANIFEST
+Changes
 README
 Makefile.PL
 lib/IO/Socket/SSL.pm
@@ -19,7 +20,14 @@ demo/ssl_server.pl
 demo/ssl_client.pl
 demo/daemon.pl
 util/export_certs.pl
-diffs/HTTP_Daemon.pm.diff
-diffs/LWP_Protocol_https.pm.diff
+diffs/libwww-perl/HTTP_Daemon.pm.diff
+diffs/libwww-perl/LWP_Protocol_https.pm.diff
+diffs/Net-SSLeay/SSLeay.xs.diff
+diffs/Net-SSLeay/ptrcasttst.c
+diffs/Net-SSLeay/ptrtstrun.pl
 experimental/openssl-swig.tar.gz
 experimental/netssleay-openssl.diff
+docs/ClassDiagram-HTTP.jpg
+docs/ClassDiagram-LWP.jpg
+docs/ClassDiagram-io-socket-ssl.jpg
+docs/ClassDiagram-utils.jpg
