@@ -1,0 +1,25 @@
+
+IO::Socket::SSL is a class implementing an object oriented
+interface to SSL sockets. The class is a descendent of
+IO::Socket::INET and provides a subset of the base class's
+interface methods.
+
+in order to use IO::Socket::SSL you need to have Net_SSLeay
+v1.03 or newer installed.
+
+in addition to providing a general OO interface to SSL sockets
+this package can be used with libwww-perl. at present, this
+requires a few changes to LWP modules:
+
+	1. LWP/Protocol/htts.pm: in _new_socket a IO::Socket::SSL
+	   object has to be created instead of IO::Socket::INET.
+	   replace 'require Net::SSL' with 'require
+	   IO::Socket::SSL' (diffs/LWP_Protocol_https.pm.diff).
+
+	2. HTTP/Daemon.pm: replace '@ISA=qw(IO::Socket::INET);'
+	   with '@ISA=qw(IO::Socket::SSL);' and add a use statement:
+	   'use IO::Socket::SSL;' (diffs/HTTP_Daemon.pm.diff).
+	   
+
+--
+	aspa@hip.fi
