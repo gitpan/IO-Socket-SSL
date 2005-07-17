@@ -49,8 +49,11 @@ if (! defined $ENV{SKIP_RNG_TEST}) {
 # the contents of the Makefile that is written.
 WriteMakefile(
   'NAME'	=> 'IO::Socket::SSL',
+  'AUTHOR'      => 'Peter Behroozi & Marko Asplund',
+  'ABSTRACT'    => 'Nearly transparent SSL encapsulation for IO::Socket::INET.',
   'VERSION_FROM' => 'SSL.pm',
   'DISTNAME' => 'IO-Socket-SSL',
-  'PREREQ_PM' => { 'Net::SSLeay' => 1.08 },
+  'PREREQ_PM' => { 'Net::SSLeay' => 1.21 },
   'dist' => { COMPRESS => 'gzip', SUFFIX => 'gz', },
+  'NO_META' => 1,
 );

@@ -4,7 +4,7 @@ Following are some common errors to watch out for:
 
 To use client-side session caching, you will have to apply the
 patch in the patches/ subdirectory to Net::SSLeay, or download
-the patched version at 
+the patched version at
 
 http://www.fas.harvard.edu/~behrooz/Net_SSLeay.pm-1.26.tar.gz
 

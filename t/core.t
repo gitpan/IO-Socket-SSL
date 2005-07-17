@@ -3,6 +3,7 @@
 # `make test'. After `make install' it should work as `perl t/core.t'
 
 use Net::SSLeay;
+use Socket;
 use IO::Socket::SSL;
 eval {require "t/ssl_settings.req";} ||
 eval {require "ssl_settings.req";};
@@ -13,7 +14,7 @@ $OPENSSL_VERSION = 0;
 $OPENSSL_VERSION = &Net::SSLeay::OPENSSL_VERSION_NUMBER if ($NET_SSLEAY_VERSION>=1.19);
 $CAN_PEEK = ($OPENSSL_VERSION >= 0x0090601f) ? 1 : 0;
 
-$numtests = 35;
+$numtests = 37;
 $|=1;
 
 foreach ($^O) {
@@ -47,7 +48,6 @@ print "1..$numtests\n";
 my $server = new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT,
 				 LocalAddr => $SSL_SERVER_ADDR,
 				 Listen => 2,
-				 Proto => 'tcp',
 				 Timeout => 30,
 				 ReuseAddr => 1,
 				 SSL_verify_mode => 0x00,
@@ -242,13 +242,16 @@ if ($client && $client->opened) {
 }
 &ok("Server Kill-client Check");
 
-$client = $server->accept;
+($client, $peer) = $server->accept;
 
 if (!$client) {
     print "not ok # no client\n";
     exit;
 }
 &ok("Server Client Accept Check");
+
+print "not " unless defined $peer;
+&ok("Accept returning peer address check.");
 
 
 fileno($client) || print "not ";
@@ -312,7 +315,10 @@ printf $client "\$%.2f\n%d\n%c\n%s", (1.0444442342, 4.0, ord("y"), "Test\nBeaver
 
 close $client;
 
-$client = $server->accept || &bail;
+($client, $packed) = $server->accept;
+&bail unless $client;
+print "not " unless (inet_ntoa((unpack_sockaddr_in($packed))[1]) eq "127.0.0.1");
+&ok("Peer address check");
 
 if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     $client->blocking(0);

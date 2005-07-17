@@ -190,7 +190,7 @@ unless (fork) {
     exit(0);
 }
 
-my @clients = map { $_->accept } @servers;
+my @clients = map { scalar $_->accept } @servers;
 if (!$clients[0] or !$clients[1] or !$clients[2]) {
     print "not ok \# Client init\n";
     exit;
@@ -200,7 +200,7 @@ if (!$clients[0] or !$clients[1] or !$clients[2]) {
 close $_ foreach (@clients);
 
 
-@clients = map { $_->accept } @servers;
+@clients = map { scalar $_->accept } @servers;
 if (!$clients[0] or !$clients[1] or !$clients[2]) {
     print "not ok \# Client init\n";
     exit;

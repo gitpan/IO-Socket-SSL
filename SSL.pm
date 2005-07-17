@@ -14,7 +14,7 @@
 package IO::Socket::SSL;
 
 use IO::Socket;
-use Net::SSLeay 1.08;
+use Net::SSLeay 1.21;
 use Carp;
 use strict;
 use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
@@ -22,7 +22,7 @@ use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.96';
+    $VERSION = '0.97';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -48,8 +48,7 @@ sub configure {
     my ($self, $arg_hash) = @_;
     return _invalid_object() unless($self);
 
-    $self->configure_SSL($arg_hash)
-	|| return;
+    $self->configure_SSL($arg_hash) || return;
 
     return ($self->SUPER::configure($arg_hash)
 	|| $self->error("@ISA configuration failed"));
@@ -60,7 +59,8 @@ sub configure_SSL {
 
     my $is_server = $arg_hash->{'SSL_server'} || $arg_hash->{'Listen'} || 0;
     my %default_args =
-	('SSL_server'    => $is_server,
+	('Proto'         => 'tcp',
+	 'SSL_server'    => $is_server,
 	 'SSL_key_file'  => $is_server ? 'certs/server-key.pem'  : 'certs/client-key.pem',
 	 'SSL_cert_file' => $is_server ? 'certs/server-cert.pem' : 'certs/client-cert.pem',
 	 'SSL_ca_file'   => 'certs/my-ca.pem',
@@ -72,11 +72,18 @@ sub configure_SSL {
 	 'SSL_verify_callback' => 0,
 	 'SSL_cipher_list' => 'ALL:!LOW:!EXP');
 
+
     #Replace nonexistent entries with defaults
-    $arg_hash = { %default_args, %$GLOBAL_CONTEXT_ARGS, %$arg_hash };
+    %$arg_hash = ( %default_args, %$GLOBAL_CONTEXT_ARGS, %$arg_hash );
 
     #Avoid passing undef arguments to Net::SSLeay
     !defined($arg_hash->{$_}) and ($arg_hash->{$_} = '') foreach (keys %$arg_hash);
+
+    #Handle CA paths properly if no CA file is specified
+    if ($arg_hash->{'SSL_ca_path'} ne '' and !(-f $arg_hash->{'SSL_ca_file'})) {
+	warn "CA file $arg_hash->{'SSL_ca_file'} not found, using CA path instead.\n" if ($DEBUG);
+	$arg_hash->{'SSL_ca_file'} = '';
+    }
 
     ${*$self}{'_SSL_arguments'} = $arg_hash;
     ${*$self}{'_SSL_ctx'} = new IO::Socket::SSL::SSL_Context($arg_hash) || return;
@@ -125,7 +132,7 @@ sub connect_SSL {
 	if ($self->errstr =~ /SSL wants a (write|read) first!/) {
 	    require IO::Select;
 	    my $sel = new IO::Select($socket);
-	    my $timeout = $arg_hash->{Timeout} || undef;
+	    my ($timeout) = grep { defined $_ } (@{$arg_hash}{"Timeout","timeout","io_socket_timeout"});
 	    next if (($1 eq 'write') ? $sel->can_write($timeout) : $sel->can_read($timeout));
 	}
 	return;
@@ -148,11 +155,13 @@ sub accept {
     my $class = shift || 'IO::Socket::SSL';
     my $arg_hash = ${*$self}{'_SSL_arguments'};
 
-    my $socket = $self->SUPER::accept($class)
-	|| return $self->error("@ISA accept failed");
+    my ($socket, $peer) = $self->SUPER::accept($class)
+	or return $self->error("@ISA accept failed");
 
-    return ($socket->accept_SSL(${*$self}{'_SSL_ctx'}, $arg_hash)
-	    || $self->error($ERROR) || $socket->fatal_ssl_error);
+    $socket->accept_SSL(${*$self}{'_SSL_ctx'}, $arg_hash)
+	|| return($self->error($ERROR) || $socket->fatal_ssl_error);
+
+    return wantarray ? ($socket, $peer) : $socket;
 }
 
 sub accept_SSL {
@@ -178,14 +187,13 @@ sub accept_SSL {
 	if ($socket->errstr =~ /SSL wants a (write|read) first!/) {
 	    require IO::Select;
 	    my $sel = new IO::Select($socket);
-	    my $timeout = $arg_hash->{Timeout} || undef;
+	    my ($timeout) = grep { defined $_ } (@{$arg_hash}{"Timeout","timeout","io_socket_timeout"});
 	    next if (($1 eq 'write') ? $sel->can_write($timeout) : $sel->can_read($timeout));
 	}
 	return;
     }
 
     tie *{$socket}, "IO::Socket::SSL::SSL_HANDLE", $socket;
-
     return $socket;
 }
 
@@ -196,13 +204,13 @@ sub generic_read {
     my $ssl = $self->_get_ssl_object || return;
 
     my $data = $read_func->($ssl, $length);
-    return $self->error("SSL read error") unless (defined $data);
+    return $self->error("SSL read error") unless (defined($data) && length($data));
 
     my $buffer=\$_[2];
     $length = length($data);
     $$buffer ||= '';
     $offset ||= 0;
-    if ($offset>length($$buffer)) {
+    if ($offset > length($$buffer)) {
 	$$buffer.="\0" x ($offset-length($$buffer));  #mimic behavior of read
     }
 
@@ -212,15 +220,16 @@ sub generic_read {
 
 sub read {
     my $self = shift;
-    return $self->generic_read(\&Net::SSLeay::read, @_);
+    return $self->generic_read($self->blocking ? \&Net::SSLeay::ssl_read_all :
+			       \&Net::SSLeay::read, @_);
 }
 
 sub peek {
     my $self = shift;
-    if ($Net::SSLeay::VERSION >= 1.19 && Net::SSLeay::OPENSSL_VERSION_NUMBER() >= 0x0090601f) {
+    if (Net::SSLeay::OPENSSL_VERSION_NUMBER() >= 0x0090601f) {
 	return $self->generic_read(\&Net::SSLeay::peek, @_);
     } else {
-	return $self->error("SSL_peek not supported for Net::SSLeay < v1.19 or OpenSSL < v0.9.6a");
+	return $self->error("SSL_peek not supported for OpenSSL < v0.9.6a");
     }
 }
 
@@ -233,13 +242,13 @@ sub write {
     $length ||= $buf_len;
     $offset ||= 0;
     return $self->error("Invalid offset for SSL write") if ($offset>$buf_len);
-    return 0 if ($offset==$buf_len);
+    return 0 if ($offset == $buf_len);
 
 
     my $written = Net::SSLeay::ssl_write_all
 	($ssl, \substr($$buffer, $offset, $length));
 
-    return $self->error("SSL write error") if ($written<0);
+    return $self->error("SSL write error") if (!defined($written) or $written<0);
     return $written;
 }
 
@@ -267,8 +276,7 @@ sub printf {
 }
 
 sub getc {
-    my $self = shift;
-    my $buffer;
+    my ($self, $buffer) = (shift, undef);
     return $buffer if $self->read($buffer, 1, 0);
 }
 
@@ -301,14 +309,14 @@ sub close {
 	$ctx->DESTROY();
     }
 
-    if ($Net::SSLeay::VERSION>=1.18 and ${*$self}{'_SSL_certificate'}) {
+    if (${*$self}{'_SSL_certificate'}) {
 	Net::SSLeay::X509_free(${*$self}{'_SSL_certificate'});
     }
 
     ${*$self}{'_SSL_opened'} = 0;
     my $arg_hash = ${*$self}{'_SSL_arguments'};
     untie(*$self) unless ($arg_hash->{'SSL_server'}
-		       or $close_args->{_SSL_in_DESTROY});
+			  or $close_args->{_SSL_in_DESTROY});
 
     $self->SUPER::close unless ($close_args->{_SSL_in_DESTROY});
 }
@@ -352,16 +360,21 @@ sub start_SSL {
     return $class->error("Not a socket") unless(ref($socket));
     my $arg_hash = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
     my $original_class = ref($socket);
+    my $original_fileno = (UNIVERSAL::can($socket, "fileno"))
+	? $socket->fileno : CORE::fileno($socket);
+    return $class->error("Socket has no fileno") unless defined $original_fileno;
 
     bless $socket, $class;
     $socket->configure_SSL($arg_hash) or bless($socket, $original_class) && return;
+
+    ${*$socket}{'_SSL_fileno'} = $original_fileno;
     $arg_hash = ${*$socket}{'_SSL_arguments'};
 
-    my $result = ($arg_hash->{'SSL_server'} ?
-		    $socket->accept_SSL (${*$socket}{'_SSL_ctx'}, $arg_hash)
+    my $result = ($arg_hash->{'SSL_server'} 
+		  ? $socket->accept_SSL (${*$socket}{'_SSL_ctx'}, $arg_hash)
 		  : $socket->connect_SSL($socket));
 
-    return $result ? $socket : bless($socket, $original_class) && ();
+    return $result ? $socket : (bless($socket, $original_class) && ());
 }
 
 sub new_from_fd {
@@ -392,9 +405,9 @@ sub peer_certificate {
     my $cert = ${*$self}{'_SSL_certificate'} ||= Net::SSLeay::get_peer_certificate($ssl) ||
 	return $self->error("Could not retrieve peer certificate");
 
-    my $name = ($field eq "issuer" or $field eq "authority") ?
-	Net::SSLeay::X509_get_issuer_name($cert) :
-	Net::SSLeay::X509_get_subject_name($cert);
+    my $name = ($field eq "issuer" or $field eq "authority")
+	? Net::SSLeay::X509_get_issuer_name($cert)
+	: Net::SSLeay::X509_get_subject_name($cert);
 
     return $self->error("Could not retrieve peer certificate $field") unless ($name);
     return Net::SSLeay::X509_NAME_oneline($name);
@@ -513,7 +526,7 @@ use vars qw($HAVE_WEAKREF);
 
 BEGIN {
     local ($@, $SIG{__DIE__});
-    
+
     #Use Scalar::Util or WeakRef if possible:
     eval "use Scalar::Util qw(weaken isweak); 1" or
 	eval "use WeakRef";
@@ -526,20 +539,20 @@ sub TIEHANDLE {
     bless \$handle, $class;
 }
 
-sub READ     { return ${shift()}->read    (@_) }
-sub READLINE { return ${shift()}->readline(@_) }
-sub GETC     { return ${shift()}->getc    (@_) }
+sub READ     { ${shift()}->read     (@_) }
+sub READLINE { ${shift()}->readline (@_) }
+sub GETC     { ${shift()}->getc     (@_) }
 
-sub PRINT    { return ${shift()}->print   (@_) }
-sub PRINTF   { return ${shift()}->printf  (@_) }
-sub WRITE    { return ${shift()}->write   (@_) }
+sub PRINT    { ${shift()}->print    (@_) }
+sub PRINTF   { ${shift()}->printf   (@_) }
+sub WRITE    { ${shift()}->write    (@_) }
 
-sub FILENO   { return ${shift()}->fileno  (@_) }
+sub FILENO   { ${shift()}->fileno   (@_) }
 
 sub CLOSE {                          #<---- Do not change this function!
     my $ssl = ${$_[0]};
     local @_;
-    return $ssl->close();
+    $ssl->close();
 }
 
 
@@ -549,7 +562,7 @@ use strict;
 # Note that the final object will actually be a reference to the scalar
 # (C-style pointer) returned by Net::SSLeay::CTX_*_new() so that
 # it can be blessed.
-sub new 
+sub new
 {
     my $class = shift;
     my $arg_hash = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
@@ -558,7 +571,7 @@ sub new
     if ($ctx_object) {
 	return $ctx_object if ($ctx_object->isa('IO::Socket::SSL::SSL_Context') and
 			       $ctx_object->{context});
-	
+
 	# The following "double entendre" applies only if someone passed
 	# in an IO::Socket::SSL object instead of an actual context.
 	return $ctx_object if ($ctx_object = ${*$ctx_object}{'_SSL_ctx'});
@@ -566,8 +579,8 @@ sub new
 
     my $ctx;
     foreach ($arg_hash->{'SSL_version'}) {
-	$ctx = /^sslv2$/i ? Net::SSLeay::CTX_v2_new() :
-	       /^sslv3$/i ? Net::SSLeay::CTX_v3_new() :
+	$ctx = /^sslv2$/i ? Net::SSLeay::CTX_v2_new()    :
+	       /^sslv3$/i ? Net::SSLeay::CTX_v3_new()    :
 	       /^tlsv1$/i ? Net::SSLeay::CTX_tlsv1_new() :
 	                    Net::SSLeay::CTX_new();
     }
@@ -581,7 +594,7 @@ sub new
     {
 	&Net::SSLeay::CTX_load_verify_locations
 	    ($ctx, @{$arg_hash}{'SSL_ca_file','SSL_ca_path'}) ||
-	    return IO::Socket::SSL->error("Invalid certificate authority locations");
+	     return IO::Socket::SSL->error("Invalid certificate authority locations");
     }
 
     if ($arg_hash->{'SSL_check_crl'}) {
@@ -599,20 +612,15 @@ sub new
 	my $filetype = Net::SSLeay::FILETYPE_PEM();
 
 	if ($arg_hash->{'SSL_passwd_cb'}) {
-	    if ($Net::SSLeay::VERSION < 1.16) {
-		return IO::Socket::SSL->error("Password callbacks are not supported for Net::SSLeay < v1.16");
-	    } else {
-		Net::SSLeay::CTX_set_default_passwd_cb
-		    ($ctx, $arg_hash->{'SSL_passwd_cb'});
-	    }
+	    Net::SSLeay::CTX_set_default_passwd_cb($ctx, $arg_hash->{'SSL_passwd_cb'});
 	}
 
 	Net::SSLeay::CTX_use_PrivateKey_file
 	    ($ctx, $arg_hash->{'SSL_key_file'}, $filetype)
 	    || return IO::Socket::SSL->error("Failed to open Private Key");
 
-	Net::SSLeay::CTX_use_certificate_file
-	    ($ctx, $arg_hash->{'SSL_cert_file'}, $filetype)
+	Net::SSLeay::CTX_use_certificate_chain_file
+	    ($ctx, $arg_hash->{'SSL_cert_file'})
 	    || return IO::Socket::SSL->error("Failed to open Certificate");
     }
 
@@ -697,7 +705,7 @@ sub get_session {
 
 sub add_session {
     my ($self, $key, $val) = @_;
-    
+
     return if ($key eq '_maxsize' or $key eq '_head');
 
     if ((keys %$self) > $self->{'_maxsize'} + 1) {
@@ -728,7 +736,7 @@ sub DESTROY {
     foreach my $key (keys %$self) {
 	Net::SSLeay::SESSION_free($self->{$key}->{session});
     }
-} 
+}
 
 
 'True Value';
@@ -825,8 +833,7 @@ setting up an unauthenticated client.
 
 If your private key is encrypted, you might not want the default password prompt from
 Net::SSLeay.  This option takes a reference to a subroutine that should return the
-password required to decrypt your private key.  Note that Net::SSLeay >= 1.16 is
-required for this to work.
+password required to decrypt your private key.
 
 =item SSL_ca_file
 
@@ -893,8 +900,9 @@ The session cache size refers to the number of unique host/port pairs that can b
 stored at one time; the oldest sessions in the cache will be removed if new ones are
 added.  This requires an unofficial patched version of Net::SSLeay to work; check
 the patches directory, or download the altered version at L<http://www.fas.harvard.edu/~behrooz/Net_SSLeay.pm-1.26.tar.gz>.
-I have so far been unable to contact Sampo Kellomäki about the patch, but hopefully
-the matter will be resolved by the next release.
+I have contacted Sampo Kellomäki about the patch, and he has assured me that it
+will appear in the next official release, but that has (as of this writing) not
+yet seen the light of CPAN.
 
 =item SSL_error_trap
 
@@ -940,7 +948,7 @@ you close it, set this option to a true value.
 This function has exactly the same syntax as sysread(), and performs nearly the same
 task (reading data from the socket) but will not advance the read position so
 that successive calls to peek() with the same arguments will return the same results.
-This function requires Net::SSLeay v1.19 or higher and OpenSSL 0.9.6a or later to work.
+This function requires OpenSSL 0.9.6a or later to work.
 
 
 =item B<pending()>
@@ -1100,7 +1108,9 @@ See the 'example' directory.
 I have never shipped a module with a known bug, and IO::Socket::SSL is no
 different.  If you feel that you have found a bug in the module and you are
 using the latest versions of Net::SSLeay and OpenSSL, send an email immediately to
-<behrooz at fas.harvard.edu> with a subject of 'IO::Socket::SSL Bug'.  I am
+<behrooz at fas.harvard.edu> with a subject of 'IO::Socket::SSL Bug'.  Until very
+recently, I did not receive any indication when a bug was submitted to the CPAN
+request tracker, so e-mail is a much more reliable tool.  I am
 I<not responsible> for problems in your code, so make sure that an example
 actually works before sending it. It is merely acceptable if you send me a bug
 report, it is better if you send a small chunk of code that points it out,
@@ -1169,7 +1179,7 @@ Marko Asplund, <marko.asplund at kronodoc.fi>, was the original author of IO::So
 
 =head1 COPYRIGHT
 
-The rewrite of this module is Copyright (C) 2002-2004 Peter Behroozi.
+The rewrite of this module is Copyright (C) 2002-2005 Peter Behroozi.
 
 The original versions of this module are Copyright (C) 1999-2002 Marko Asplund.
 
