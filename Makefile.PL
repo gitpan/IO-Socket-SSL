@@ -53,7 +53,7 @@ WriteMakefile(
   'ABSTRACT'    => 'Nearly transparent SSL encapsulation for IO::Socket::INET.',
   'VERSION_FROM' => 'SSL.pm',
   'DISTNAME' => 'IO-Socket-SSL',
-  'PREREQ_PM' => { 'Net::SSLeay' => 1.21 },
+  'PREREQ_PM' => { 'Net::SSLeay' => 1.21, 'Scalar::Util' => 0 },
   'dist' => { COMPRESS => 'gzip', SUFFIX => 'gz', },
   'NO_META' => 1,
 );

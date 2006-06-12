@@ -11,6 +11,7 @@ Changes
 docs/debugging.txt
 example/ssl_client.pl
 example/ssl_server.pl
+example/async_https_server.pl
 Makefile.PL
 MANIFEST
 patches/Net_SSLeay.patch
@@ -20,7 +21,9 @@ t/01loadmodule.t
 t/02settings.t
 t/compatibility.t
 t/core.t
+t/nonblock.t
 t/sessions.t
 t/ssl_settings.req
+t/startssl.t
 util/export_certs.pl
 META.yml

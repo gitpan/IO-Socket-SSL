@@ -1,3 +1,29 @@
+v0.98
+	- Maintainer changed to <Steffen_Ullrich at genua dot de>
+	- Better support for nonblocking sockets:
+	  . exports $SSL_ERROR which contains the latest error from
+	    the openssl library. Exports constants SSL_WANT_READ and
+	    SSL_WANT_WRITE es special errors which will be set if
+	    openssl wants to write or read during nonblocking connects,
+	    accepts, reads or writes.
+	  . accept,accept_SSL,connect and connect_SSL don't block
+	    anymore if the socket is nonblocking.
+	    Instead $! will be set from the underlying IO::Socket::INET
+	    connect or accept if it failed there (usually EAGAIN or 
+	    EINPROGRESS) or if the underlying openssl needs to read or
+	    write $! will be set to EAGAIN and $SSL_ERROR will be set
+	    to SSL_WANT_READ or SSL_WANT_WRITE
+	  . syswrite returns undef and sets $!,$SSL_ERROR if it fails 
+	    to write instead of returning 0.
+	- Bugfixes (http://rt.cpan.org/Public/Bug/Display.html?id=Bugid)
+	  . Bug 18439: fileno 0 should be valid
+	  . Bug 15001: sysread interpretes buffer "0" as ""
+	- peer_certifcate returns X509 struct string if no field
+	  for extraction was specified 
+	- get_peer_certificate returns the certificate instead of the
+	  IO::Socket::SSL object
+	
+   
 v0.97
 	- Writes now correctly return errors.  (Problem noted by
 	  Dominique Quatravaux <dom at idealx.com>).

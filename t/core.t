@@ -2,9 +2,13 @@
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl t/core.t'
 
+eval 'use Debug';
+*{DEBUG} = sub {} if !defined(&DEBUG);
+
 use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
+use Errno 'EAGAIN';
 eval {require "t/ssl_settings.req";} ||
 eval {require "ssl_settings.req";};
 
@@ -323,7 +327,7 @@ print "not " unless (inet_ntoa((unpack_sockaddr_in($packed))[1]) eq "127.0.0.1")
 if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     $client->blocking(0);
     $client->read($buffer, 20, 0);
-    print "not " if ($client->errstr() !~ /wants a read/);
+    print "not " if $SSL_ERROR != SSL_WANT_READ;
     &ok("Server Nonblocking Check 1");
 }
 
@@ -347,10 +351,23 @@ if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     close $client;
 
     $server->blocking(0);
-    my $sel = new IO::Select($server);
-    $sel->can_read(30);
+    IO::Select->new($server)->can_read(30);
     $client = $server->accept;
-    print "not " if (!$client->opened);
+    while ( ! $client ) {
+	DEBUG( "$!,$SSL_ERROR" );
+	if ( $! == EAGAIN ) {
+	    if ( $SSL_ERROR == SSL_WANT_WRITE ) {
+    		IO::Select->new( $server->opening )->can_write(30);
+	    } else {
+    		IO::Select->new( $server->opening )->can_read(30);
+	    }
+	} else {
+	    last
+	}
+	$client = $server->accept;
+    }
+    	
+    print "not " unless ($client && $client->opened);
     &ok("Server Nonblocking Check 3");
     close $client;
 }

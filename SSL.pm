@@ -15,28 +15,67 @@ package IO::Socket::SSL;
 
 use IO::Socket;
 use Net::SSLeay 1.21;
+use Exporter ();
+use Scalar::Util 'dualvar';
+use Errno 'EAGAIN';
 use Carp;
 use strict;
-use vars qw(@ISA $VERSION $DEBUG $ERROR $GLOBAL_CONTEXT_ARGS);
+
+use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
+
+eval 'require Debug; Debug->import';
+*{DEBUG} = sub { warn "DEBUG: @_\n" if $DEBUG>=2 } if !defined(&DEBUG);
+
+{
+    # These constants will be used in $! at return from SSL_connect, 
+    # SSL_accept, generic_read and write, thus notifying the caller
+    # the usual way of problems. Like with EAGAIN, EINPROGRESS..
+    # these are especially important for non-blocking sockets
+
+    my $x = Net::SSLeay::ERROR_WANT_READ();
+    use constant SSL_WANT_READ  => dualvar( \$x, 'SSL wants a read first' );
+    my $y = Net::SSLeay::ERROR_WANT_WRITE();
+    use constant SSL_WANT_WRITE => dualvar( \$y, 'SSL wants a write first' );
+
+    @EXPORT = qw( SSL_WANT_READ SSL_WANT_WRITE $SSL_ERROR );
+}
 
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.97';
+    $VERSION = '0.98';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
     *DEBUG = \$Net::SSLeay::trace;
 
+    #Compability
+    *ERROR = \$SSL_ERROR;
+
     # Do Net::SSLeay initialization
     Net::SSLeay::load_error_strings();
     Net::SSLeay::SSLeay_add_ssl_algorithms();
     Net::SSLeay::randomize();
+
 }
 
-sub import { foreach (@_) { @ISA=qw(IO::Socket::INET), next if /inet4/i;
-			    @ISA=qw(IO::Socket::INET6), next if /inet6/i;
-			    $DEBUG=$1 if /debug(\d)/; }}
+# Export some stuff
+# inet4|inet6|debug will be handeled by myself, everything
+# else will be handeld the Exporter way
+sub import { 
+    my $class = shift;
+
+    my @export;
+    foreach (@_) { 
+	@ISA=qw(IO::Socket::INET), next if /inet4/i;
+	@ISA=qw(IO::Socket::INET6), next if /inet6/i;
+	$DEBUG=$1, next if /debug(\d)/; 
+	push @export,$_
+    }
+
+    @_ = ( $class,@export );
+    goto &Exporter::import;
+}
 
 # You might be expecting to find a new() subroutine here, but that is
 # not how IO::Socket::INET works.  All configuration gets performed in
@@ -48,10 +87,21 @@ sub configure {
     my ($self, $arg_hash) = @_;
     return _invalid_object() unless($self);
 
+    # force initial blocking 
+    # otherwise IO::Socket::SSL->new might return undef if the
+    # socket is nonblocking and it fails to connect immediatly
+    # for real nonblocking behavior one should create a nonblocking
+    # socket and later call connect explicitly
+    my $blocking = delete $arg_hash->{Blocking};
+    $arg_hash->{Blocking} = 1;
+
     $self->configure_SSL($arg_hash) || return;
 
-    return ($self->SUPER::configure($arg_hash)
-	|| $self->error("@ISA configuration failed"));
+    $self->SUPER::configure($arg_hash)
+	|| return $self->error("@ISA configuration failed");
+
+    $self->blocking(0) if defined $blocking && !$blocking;
+    return $self;
 }
 
 sub configure_SSL {
@@ -93,53 +143,96 @@ sub configure_SSL {
 }
 
 
+sub _set_rw_error {
+    my ($self,$ssl,$rv) = @_;
+    my $err = Net::SSLeay::get_error($ssl,$rv);
+    $! ||= EAGAIN;
+    $SSL_ERROR = 
+	$err == Net::SSLeay::ERROR_WANT_READ()  ? SSL_WANT_READ :
+	$err == Net::SSLeay::ERROR_WANT_WRITE() ? SSL_WANT_WRITE :
+	return;
+    ${*$self}{'_SSL_last_err'} = $SSL_ERROR if (ref($self));
+    return 1;
+}
+
+
 #Call to connect occurs when a new client socket is made using
 #IO::Socket::INET
 sub connect {
     my $self = shift || return _invalid_object();
+    return $self if ${*$self}{'_SSL_opened'};  # already connected
 
-    my $socket = $self->SUPER::connect(@_)
-	|| return $self->error("@ISA connect attempt failed");
-
-    return $self->connect_SSL($socket) || $self->fatal_ssl_error;
+    if ( ! ${*$self}{'_SSL_opening'} ) {
+	# call SUPER::connect if the underlying socket is not connected
+	# if this fails this might not be an error (e.g. if $! = EINPROGRESS
+	# and socket is nonblocking this is normal), so keep any error
+	# handling to the client
+	DEBUG( 'socket not yet connected' );
+	$self->SUPER::connect(@_) || return;
+	DEBUG( 'socket connected' );
+    }
+    return $self->connect_SSL;
 }
 
 
 sub connect_SSL {
-    my ($self, $socket) = @_;
-    my $arg_hash = ${*$self}{'_SSL_arguments'};
-    ${*$self}{'_SSL_opened'}=1;
+    my $self = shift;
 
-    my $fileno = ${*$self}{'_SSL_fileno'} = fileno($socket);
-    return $self->error("Socket has no fileno") unless (defined $fileno);
+    my ($ssl,$ctx);
+    if ( ! ${*$self}{'_SSL_opening'} ) {
+	# start ssl connection
+	DEBUG( 'ssl handshake not started' );
+	${*$self}{'_SSL_opening'} = 1;
+	my $arg_hash = ${*$self}{'_SSL_arguments'};
 
-    my $ctx = ${*$self}{'_SSL_ctx'};  # Reference to real context
-    my $ssl = ${*$self}{'_SSL_object'} = Net::SSLeay::new($ctx->{context})
-	|| return $self->error("SSL structure creation failed");
+	my $fileno = ${*$self}{'_SSL_fileno'} = fileno($self);
+	return $self->error("Socket has no fileno") unless (defined $fileno);
 
-    Net::SSLeay::set_fd($ssl, $fileno)
-	|| return $self->error("SSL filehandle association failed");
+	$ctx = ${*$self}{'_SSL_ctx'};  # Reference to real context
+	$ssl = ${*$self}{'_SSL_object'} = Net::SSLeay::new($ctx->{context})
+	    || return $self->error("SSL structure creation failed");
 
-    Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
-	|| return $self->error("Failed to set SSL cipher list");
+	Net::SSLeay::set_fd($ssl, $fileno)
+	    || return $self->error("SSL filehandle association failed");
 
-    my ($addr, $port) = @{$arg_hash}{'PeerAddr','PeerPort'};
-    my $session = $ctx->session_cache($addr, $port);
-    Net::SSLeay::set_session($ssl, $session) if ($session);
+	Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
+	    || return $self->error("Failed to set SSL cipher list");
 
-    while (Net::SSLeay::connect($ssl)<1) {
-	$self->error("SSL connect attempt failed");
-	if ($self->errstr =~ /SSL wants a (write|read) first!/) {
-	    require IO::Select;
-	    my $sel = new IO::Select($socket);
-	    my ($timeout) = grep { defined $_ } (@{$arg_hash}{"Timeout","timeout","io_socket_timeout"});
-	    next if (($1 eq 'write') ? $sel->can_write($timeout) : $sel->can_read($timeout));
-	}
-	return;
+	my $session = $ctx->session_cache( $arg_hash->{PeerAddr}, $arg_hash->{PeerPort} );
+	Net::SSLeay::set_session($ssl, $session) if ($session);
     }
 
-    if ($ctx->has_session_cache && !$session) {
-	$ctx->session_cache($addr, $port, Net::SSLeay::get1_session($ssl));
+    $ssl ||= ${*$self}{'_SSL_object'};
+
+    $SSL_ERROR = undef;
+    DEBUG( 'calling ssleay::connect' );
+    my $rv = Net::SSLeay::connect($ssl);
+    DEBUG( "rv=$rv" );
+    if ( $rv < 0 ) {
+	unless ( $self->_set_rw_error( $ssl,$rv )) {
+	    $self->error("SSL connect attempt failed with unknown error");
+	    delete ${*$self}{'_SSL_opening'};
+	    return $self->fatal_ssl_error();
+	}
+	DEBUG( 'ssl handshake in progress' );
+	return;
+    } elsif ( $rv == 0 ) {
+	delete ${*$self}{'_SSL_opening'};
+	$self->error("SSL connect attempt failed because of handshake problems" );
+	return $self->fatal_ssl_error();
+    }
+
+    DEBUG( 'ssl handshake done' );
+    # ssl connect successful
+    delete ${*$self}{'_SSL_opening'};
+    ${*$self}{'_SSL_opened'}=1;
+
+    $ctx ||= ${*$self}{'_SSL_ctx'};
+    if ( $ctx->has_session_cache ) {
+	my $arg_hash = ${*$self}{'_SSL_arguments'};
+	my ($addr,$port) = ( $arg_hash->{PeerAddr}, $arg_hash->{PeerPort} );
+	my $session = $ctx->session_cache( $addr,$port );
+	$ctx->session_cache( $addr,$port, Net::SSLeay::get1_session($ssl) ) if !$session;
     }
 
     tie *{$self}, "IO::Socket::SSL::SSL_HANDLE", $self;
@@ -153,64 +246,94 @@ sub connect_SSL {
 sub accept {
     my $self = shift || return _invalid_object();
     my $class = shift || 'IO::Socket::SSL';
-    my $arg_hash = ${*$self}{'_SSL_arguments'};
 
-    my ($socket, $peer) = $self->SUPER::accept($class)
-	or return $self->error("@ISA accept failed");
+    my $socket = ${*$self}{'_SSL_opening'};
+    if ( ! $socket ) {
+	# underlying socket not done
+	DEBUG( 'no socket yet' );
+	$socket = $self->SUPER::accept($class) || return;
+	DEBUG( 'accept created normal socket '.$socket );
+    }
 
-    $socket->accept_SSL(${*$self}{'_SSL_ctx'}, $arg_hash)
-	|| return($self->error($ERROR) || $socket->fatal_ssl_error);
+    $self->accept_SSL($socket) || return;
+    DEBUG( 'accept_SSL ok' );
 
-    return wantarray ? ($socket, $peer) : $socket;
+    return wantarray ? ($socket, getpeername($socket) ) : $socket;
 }
 
 sub accept_SSL {
-    my ($socket, $ctx, $arg_hash) = @_;
-    ${*$socket}{'_SSL_arguments'} = { %$arg_hash, SSL_server => 0 };
-    ${*$socket}{'_SSL_ctx'} = $ctx;
-    ${*$socket}{'_SSL_opened'} = 1;
+    my ($self,$socket) = @_;
+    $socket ||= $self;
 
-    my $fileno = ${*$socket}{'_SSL_fileno'} = fileno($socket);
-    return $socket->error("Socket has no fileno") unless (defined $fileno);
+    my $ssl;
+    if ( ! ${*$self}{'_SSL_opening'} ) {
+	DEBUG( 'starting sslifying' );
+	${*$self}{'_SSL_opening'} = $socket;
+	my $arg_hash = ${*$self}{'_SSL_arguments'};
+	${*$socket}{'_SSL_arguments'} = { %$arg_hash, SSL_server => 0 };
+	my $ctx = ${*$socket}{'_SSL_ctx'} = ${*$self}{'_SSL_ctx'};
 
-    my $ssl = ${*$socket}{'_SSL_object'} = Net::SSLeay::new($ctx->{context})
-	|| return $socket->error("SSL structure creation failed");
+	my $fileno = ${*$socket}{'_SSL_fileno'} = fileno($socket);
+	return $socket->error("Socket has no fileno") unless (defined $fileno);
 
-    Net::SSLeay::set_fd($ssl, $fileno)
-	|| return $socket->error("SSL filehandle association failed");
+	$ssl = ${*$socket}{'_SSL_object'} = Net::SSLeay::new($ctx->{context})
+	    || return $socket->error("SSL structure creation failed");
 
-    Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
-	|| return $socket->error("Failed to set SSL cipher list");
+	Net::SSLeay::set_fd($ssl, $fileno)
+	    || return $socket->error("SSL filehandle association failed");
 
-    while (Net::SSLeay::accept($ssl)<1) {
-	$socket->error("SSL accept attempt failed");
-	if ($socket->errstr =~ /SSL wants a (write|read) first!/) {
-	    require IO::Select;
-	    my $sel = new IO::Select($socket);
-	    my ($timeout) = grep { defined $_ } (@{$arg_hash}{"Timeout","timeout","io_socket_timeout"});
-	    next if (($1 eq 'write') ? $sel->can_write($timeout) : $sel->can_read($timeout));
-	}
-	return;
+	Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
+	    || return $socket->error("Failed to set SSL cipher list");
     }
 
+    $ssl ||= ${*$socket}{'_SSL_object'};
+
+    $SSL_ERROR = undef;
+    DEBUG( 'calling ssleay::accept' );
+    my $rv = Net::SSLeay::accept($ssl);
+    DEBUG( 'called ssleay::accept rv='.$rv );
+    if ( $rv < 0 ) {
+	unless ( $self->_set_rw_error( $ssl,$rv )) {
+	    $self->error("SSL accept attempt failed with unknown error");
+	    delete ${*$self}{'_SSL_opening'};
+	    return $socket->fatal_ssl_error();
+	}
+	return;
+    } elsif ( $rv == 0 ) {
+	$self->error("SSL connect accept failed because of handshake problems" );
+	delete ${*$self}{'_SSL_opening'};
+	return $socket->fatal_ssl_error();
+    }
+
+    DEBUG( 'handshake done, socket ready' );
+    # socket opened
+    delete ${*$self}{'_SSL_opening'};
+    ${*$socket}{'_SSL_opened'} = 1;
+
     tie *{$socket}, "IO::Socket::SSL::SSL_HANDLE", $socket;
+
     return $socket;
 }
 
 
 ####### I/O subroutines ########################
+
 sub generic_read {
     my ($self, $read_func, undef, $length, $offset) = @_;
     my $ssl = $self->_get_ssl_object || return;
-
-    my $data = $read_func->($ssl, $length);
-    return $self->error("SSL read error") unless (defined($data) && length($data));
-
     my $buffer=\$_[2];
+    
+    $SSL_ERROR = undef;
+    my $data = $read_func->($ssl, $length);
+    if ( !defined($data)) {
+	$self->_set_rw_error( $ssl,-1 ) || $self->error("SSL read error");
+	return;
+    }
+    
     $length = length($data);
-    $$buffer ||= '';
+    $$buffer = '' if !defined $$buffer;
     $offset ||= 0;
-    if ($offset > length($$buffer)) {
+    if ($offset>length($$buffer)) {
 	$$buffer.="\0" x ($offset-length($$buffer));  #mimic behavior of read
     }
 
@@ -220,8 +343,10 @@ sub generic_read {
 
 sub read {
     my $self = shift;
-    return $self->generic_read($self->blocking ? \&Net::SSLeay::ssl_read_all :
-			       \&Net::SSLeay::read, @_);
+    return $self->generic_read( 
+	$self->blocking ? \&Net::SSLeay::ssl_read_all : \&Net::SSLeay::read, 
+	@_ 
+    );
 }
 
 sub peek {
@@ -233,40 +358,41 @@ sub peek {
     }
 }
 
+
 sub write {
     my ($self, undef, $length, $offset) = @_;
     my $ssl = $self->_get_ssl_object || return;
-
     my $buffer = \$_[1];
+
     my $buf_len = length($$buffer);
     $length ||= $buf_len;
     $offset ||= 0;
     return $self->error("Invalid offset for SSL write") if ($offset>$buf_len);
     return 0 if ($offset == $buf_len);
 
+    $SSL_ERROR = undef;
+    my $written;
+    if ( $self->blocking ) {
+    	my $data = $length < $buf_len-$offset ? substr($$buffer, $offset, $length) : $$buffer;
+	$written = Net::SSLeay::ssl_write_all($ssl, $data)
+    } else {
+	$written = Net::SSLeay::write_partial( $ssl,$offset,$length,$$buffer );
+    }
+    $written = undef if $written < 0; # Net::SSLeay::write returns -1 not undef on error
+    if ( !defined($written) ) {
+	$self->_set_rw_error( $ssl,-1 )
+	    || $self->error("SSL write error");
+	return;
+    }
 
-    my $written = Net::SSLeay::ssl_write_all
-	($ssl, \substr($$buffer, $offset, $length));
-
-    return $self->error("SSL write error") if (!defined($written) or $written<0);
     return $written;
 }
 
 sub print {
     my $self = shift;
     my $ssl = $self->_get_ssl_object || return;
-
-    unless ($\ or $,) {
-	foreach my $msg (@_) {
-	    next unless defined $msg;
-	    defined(Net::SSLeay::write($ssl, $msg))
-		|| return $self->error("SSL print error");
-	}
-    } else {
-	defined(Net::SSLeay::write($ssl, join(($, or ''), @_, ($\ or ''))))
-	    || return $self->error("SSL print error");
-    }
-    return 1;
+    my $string = join(($, or ''), @_, ($\ or ''));
+    return $self->write( $string );
 }
 
 sub printf {
@@ -331,7 +457,8 @@ sub kill_socket {
 
 sub fileno {
     my $self = shift;
-    return ${*$self}{'_SSL_fileno'} || $self->SUPER::fileno();
+    my $fn = ${*$self}{'_SSL_fileno'};
+	return defined($fn) ? $fn : $self->SUPER::fileno();
 }
 
 
@@ -352,6 +479,7 @@ sub _invalid_object {
 
 sub pending {
     my $ssl = shift()->_get_ssl_object || return;
+    DEBUG( "call pending" );
     return Net::SSLeay::pending($ssl);
 }
 
@@ -368,13 +496,22 @@ sub start_SSL {
     $socket->configure_SSL($arg_hash) or bless($socket, $original_class) && return;
 
     ${*$socket}{'_SSL_fileno'} = $original_fileno;
-    $arg_hash = ${*$socket}{'_SSL_arguments'};
 
-    my $result = ($arg_hash->{'SSL_server'} 
-		  ? $socket->accept_SSL (${*$socket}{'_SSL_ctx'}, $arg_hash)
-		  : $socket->connect_SSL($socket));
+    my $start_handshake = $arg_hash->{SSL_startHandshake};
+    if ( ! defined($start_handshake) || $start_handshake ) {
+	# if we have no callback force blocking mode
+	DEBUG( "start handshake" );
+	my $blocking = $socket->blocking(1);
+	my $result = ${*$socket}{'_SSL_arguments'}{SSL_server}
+	    ? $socket->accept_SSL
+	    : $socket->connect_SSL;
+	$socket->blocking(0) if !$blocking;
+    	return $result ? $socket : (bless($socket, $original_class) && ());
+    } else {
+	DEBUG( "dont start handshake: $socket" );
+    	return $socket; # just return upgraded socket 
+    }
 
-    return $result ? $socket : (bless($socket, $original_class) && ());
 }
 
 sub new_from_fd {
@@ -393,6 +530,7 @@ sub new_from_fd {
     return $class->start_SSL($handle, @_);
 }
 
+
 sub dump_peer_certificate {
     my $ssl = shift()->_get_ssl_object || return;
     return Net::SSLeay::dump_peer_certificate($ssl);
@@ -405,12 +543,16 @@ sub peer_certificate {
     my $cert = ${*$self}{'_SSL_certificate'} ||= Net::SSLeay::get_peer_certificate($ssl) ||
 	return $self->error("Could not retrieve peer certificate");
 
-    my $name = ($field eq "issuer" or $field eq "authority")
-	? Net::SSLeay::X509_get_issuer_name($cert)
-	: Net::SSLeay::X509_get_subject_name($cert);
+    if ($field) {
+	my $name = ($field eq "issuer" or $field eq "authority")
+	    ? Net::SSLeay::X509_get_issuer_name($cert)
+	    : Net::SSLeay::X509_get_subject_name($cert);
 
-    return $self->error("Could not retrieve peer certificate $field") unless ($name);
-    return Net::SSLeay::X509_NAME_oneline($name);
+	return $self->error("Could not retrieve peer certificate $field") unless ($name);
+	return Net::SSLeay::X509_NAME_oneline($name);
+    } else {
+    	return $cert
+    };
 }
 
 sub get_cipher {
@@ -420,7 +562,7 @@ sub get_cipher {
 
 sub errstr {
     my $self = shift;
-    return ((ref($self) ? ${*$self}{'_SSL_last_err'} : $ERROR) or '');
+    return ((ref($self) ? ${*$self}{'_SSL_last_err'} : $SSL_ERROR) or '');
 }
 
 sub fatal_ssl_error {
@@ -441,23 +583,10 @@ sub get_ssleay_error {
 
 sub error {
     my ($self, $error, $destroy_socket) = @_;
-    foreach ($error) {
-	if (/ print / || / write / || / read / || / connect / || / accept /) {
-	    my $ssl = ${*$self}{'_SSL_object'};
-	    my $ssl_error = $ssl ? Net::SSLeay::get_error($ssl, -1) : 0;
-	    if ($ssl_error == Net::SSLeay::ERROR_WANT_READ()) {
-		$error.="\nSSL wants a read first!";
-	    } elsif ($ssl_error == Net::SSLeay::ERROR_WANT_WRITE()) {
-		$error.="\nSSL wants a write first!";
-	    } else {
-		$error.=Net::SSLeay::ERR_error_string
-		    (Net::SSLeay::ERR_get_error());
-	    }
-	}
-    }
+    $error .= Net::SSLeay::ERR_error_string(Net::SSLeay::ERR_get_error());
     carp $error."\n".$self->get_ssleay_error() if $DEBUG;
-    ${*$self}{'_SSL_last_err'} = $error if (ref($self));
-    $ERROR = $error;
+    $SSL_ERROR = dualvar( -1, $error );
+    ${*$self}{'_SSL_last_err'} = $SSL_ERROR if (ref($self));
     return;
 }
 
@@ -476,7 +605,7 @@ sub sysread { &IO::Socket::SSL::read; }
 sub syswrite { &IO::Socket::SSL::write; }
 sub issuer_name { return(shift()->peer_certificate("issuer")) }
 sub subject_name { return(shift()->peer_certificate("subject")) }
-sub get_peer_certificate { return shift() }
+sub get_peer_certificate { return shift()->peer_certificate() }
 
 sub context_init {
     return($GLOBAL_CONTEXT_ARGS = (ref($_[0]) eq 'HASH') ? $_[0] : {@_});
@@ -492,15 +621,13 @@ sub opened {
     return IO::Handle::opened($self) && ${*$self}{'_SSL_opened'};
 }
 
-sub want_read {
+sub opening {
     my $self = shift;
-    return scalar($self->errstr() =~ /SSL wants a read first!/);
+    return ${*$self}{'_SSL_opening'};
 }
 
-sub want_write {
-    my $self = shift;
-    return scalar($self->errstr() =~ /SSL wants a write first!/);
-}
+sub want_read  { shift->errstr == SSL_WANT_READ }
+sub want_write { shift->errstr == SSL_WANT_WRITE }
 
 
 #Redundant IO::Handle functionality
@@ -582,7 +709,7 @@ sub new
 	$ctx = /^sslv2$/i ? Net::SSLeay::CTX_v2_new()    :
 	       /^sslv3$/i ? Net::SSLeay::CTX_v3_new()    :
 	       /^tlsv1$/i ? Net::SSLeay::CTX_tlsv1_new() :
-	                    Net::SSLeay::CTX_new();
+			    Net::SSLeay::CTX_new();
     }
 
     $ctx || return IO::Socket::SSL->error("SSL Context init failed");
@@ -663,7 +790,7 @@ sub session_cache {
     my $session = shift;
 
     return (defined($session) ? $cache->add_session($key, $session)
-	                      : $cache->get_session($key));
+			      : $cache->get_session($key));
 }
 
 sub has_session_cache {
@@ -739,7 +866,7 @@ sub DESTROY {
 }
 
 
-'True Value';
+1;
 
 
 =head1 NAME
@@ -750,15 +877,15 @@ IO::Socket::SSL -- Nearly transparent SSL encapsulation for IO::Socket::INET.
 
     use IO::Socket::SSL;
 
-    my $client = new IO::Socket::SSL("www.example.com:https");
+    my $client = IO::Socket::SSL->new("www.example.com:https");
 
-    if (defined $client) {
-        print $client "GET / HTTP/1.0\r\n\r\n";
-        print <$client>;
-        close $client;
+    if ($client) {
+	print $client "GET / HTTP/1.0\r\n\r\n";
+	print <$client>;
+	close $client;
     } else {
-        warn "I encountered a problem: ",
-          IO::Socket::SSL::errstr();
+	warn "I encountered a problem: ",
+	  IO::Socket::SSL::errstr();
     }
 
 
@@ -778,6 +905,8 @@ If you have used this module before, read on, as versions 0.93 and above
 have several changes from the previous IO::Socket::SSL versions (especially
 see the note about return values).
 
+If you are using non-blocking sockets read on, as version 0.98 added better
+support for non-blocking.
 
 =head1 METHODS
 
@@ -974,15 +1103,18 @@ only fields it can return are "authority" and "owner" (or "issuer" and "subject"
 you want to use OpenSSL names), corresponding to the certificate authority that signed the
 peer certificate and the owner of the peer certificate.  This function returns a string
 with all the information about the particular field in one parsable line.
+If no field is given it returns the full certificate (x509).
 
 =item B<errstr()>
 
 Returns the last error (in string form) that occurred.  If you do not have a real
 object to perform this method on, call IO::Socket::SSL::errstr() instead.
+
 For read and write errors on non-blocking sockets, this method may include the string
 C<SSL wants a read first!> or C<SSL wants a write first!> meaning that the other side
 is expecting to read from or write to the socket and wants to be satisfied before you
-get to do anything.
+get to do anything. But with version 0.98 you are better comparing the global exported 
+variable $SSL_ERROR against the exported symbols SSL_WANT_READ and SSL_WANT_WRITE.
 
 =item B<< IO::Socket::SSL->start_SSL($socket, ... ) >>
 
@@ -992,7 +1124,12 @@ a call to new().  If you are using this function on an accept()ed socket, you mu
 set the parameter "SSL_server" to 1, i.e. IO::Socket::SSL->start_SSL($socket, SSL_server => 1).
 If you have a class that inherits from IO::Socket::SSL and you want the $socket to be blessed
 into your own class instead, use MyClass->start_SSL($socket) to achieve the desired effect.
-Note that if start_SSL() fails in SSL negotiation, $socket will remain blessed in its original class.
+
+Note that if start_SSL() fails in SSL negotiation, $socket will remain blessed in its 
+original class.  For non-blocking sockets you better just upgrade the socket to 
+IO::Socket::SSL and call accept_SSL or connect_SSL and the upgraded object. To
+just upgrade the socket set B<SSL_startHandshake> explicitly to 0. If you call start_SSL
+w/o this parameter it will revert to blocking behavior for accept_SSL and connect_SSL.
 
 =item B<< IO::Socket::SSL->new_from_fd($fd, ...) >>
 
