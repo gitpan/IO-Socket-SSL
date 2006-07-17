@@ -1,3 +1,6 @@
+v0.99
+    - just upgrade Version number because I've screwed up upload
+	  of v0.98 to cpan
 v0.98
 	- Maintainer changed to <Steffen_Ullrich at genua dot de>
 	- Better support for nonblocking sockets:
