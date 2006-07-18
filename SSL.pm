@@ -43,7 +43,7 @@ eval 'require Debug; Debug->import';
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.99';
+    $VERSION = '0.991';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -349,6 +349,12 @@ sub read {
     );
 }
 
+# contrary to the behavior of read sysread can read partial data
+sub sysread {
+    my $self = shift;
+    return $self->generic_read( \&Net::SSLeay::read, @_ );
+}
+
 sub peek {
     my $self = shift;
     if (Net::SSLeay::OPENSSL_VERSION_NUMBER() >= 0x0090601f) {
@@ -359,10 +365,11 @@ sub peek {
 }
 
 
-sub write {
-    my ($self, undef, $length, $offset) = @_;
+sub generic_write {
+    my ($self, $write_all, undef, $length, $offset) = @_;
+
     my $ssl = $self->_get_ssl_object || return;
-    my $buffer = \$_[1];
+    my $buffer = \$_[2];
 
     my $buf_len = length($$buffer);
     $length ||= $buf_len;
@@ -372,9 +379,9 @@ sub write {
 
     $SSL_ERROR = undef;
     my $written;
-    if ( $self->blocking ) {
+    if ( $write_all ) {
     	my $data = $length < $buf_len-$offset ? substr($$buffer, $offset, $length) : $$buffer;
-	$written = Net::SSLeay::ssl_write_all($ssl, $data)
+	$written = Net::SSLeay::ssl_write_all($ssl, $data);
     } else {
 	$written = Net::SSLeay::write_partial( $ssl,$offset,$length,$$buffer );
     }
@@ -388,17 +395,29 @@ sub write {
     return $written;
 }
 
+# if socket is blocking write() should return only on error or
+# if all data are written
+sub write {
+    my $self = shift;
+    return $self->generic_write( $self->blocking,@_ );
+}
+
+# contrary to write syswrite() returns already if only
+# a part of the data is written
+sub syswrite {
+    my $self = shift;
+    return $self->generic_write( 0,@_ );
+}
+
 sub print {
     my $self = shift;
-    my $ssl = $self->_get_ssl_object || return;
     my $string = join(($, or ''), @_, ($\ or ''));
     return $self->write( $string );
 }
 
 sub printf {
     my ($self,$format) = (shift,shift);
-    local $\;
-    return $self->print(sprintf($format, @_));
+    return $self->write(sprintf($format, @_));
 }
 
 sub getc {
@@ -479,7 +498,6 @@ sub _invalid_object {
 
 sub pending {
     my $ssl = shift()->_get_ssl_object || return;
-    DEBUG( "call pending" );
     return Net::SSLeay::pending($ssl);
 }
 
@@ -601,8 +619,7 @@ sub DESTROY {
 #######Extra Backwards Compatibility Functionality#######
 sub socket_to_SSL { IO::Socket::SSL->start_SSL(@_); }
 sub socketToSSL { IO::Socket::SSL->start_SSL(@_); }
-sub sysread { &IO::Socket::SSL::read; }
-sub syswrite { &IO::Socket::SSL::write; }
+
 sub issuer_name { return(shift()->peer_certificate("issuer")) }
 sub subject_name { return(shift()->peer_certificate("subject")) }
 sub get_peer_certificate { return shift()->peer_certificate() }
@@ -666,13 +683,13 @@ sub TIEHANDLE {
     bless \$handle, $class;
 }
 
-sub READ     { ${shift()}->read     (@_) }
+sub READ     { ${shift()}->sysread  (@_) }
 sub READLINE { ${shift()}->readline (@_) }
 sub GETC     { ${shift()}->getc     (@_) }
 
 sub PRINT    { ${shift()}->print    (@_) }
 sub PRINTF   { ${shift()}->printf   (@_) }
-sub WRITE    { ${shift()}->write    (@_) }
+sub WRITE    { ${shift()}->syswrite (@_) }
 
 sub FILENO   { ${shift()}->fileno   (@_) }
 
@@ -685,6 +702,10 @@ sub CLOSE {                          #<---- Do not change this function!
 
 package IO::Socket::SSL::SSL_Context;
 use strict;
+
+# should be better taken from Net::SSLeay, but they are not (yet) defined there
+use constant SSL_MODE_ENABLE_PARTIAL_WRITE => 1;
+use constant SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER => 2;
 
 # Note that the final object will actually be a reference to the scalar
 # (C-style pointer) returned by Net::SSLeay::CTX_*_new() so that
@@ -715,6 +736,14 @@ sub new
     $ctx || return IO::Socket::SSL->error("SSL Context init failed");
 
     Net::SSLeay::CTX_set_options($ctx, Net::SSLeay::OP_ALL());
+
+    # SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER makes syswrite return if at least one
+    # buffer was written and not block for the rest
+    # SSL_MODE_ENABLE_PARTIAL_WRITE can be necessary for non-blocking because we
+    # cannot guarantee, that the location of the buffer stays constant
+    Net::SSLeay::CTX_set_mode( $ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER
+    	|SSL_MODE_ENABLE_PARTIAL_WRITE);
+
 
     my ($verify_mode, $verify_cb) = @{$arg_hash}{'SSL_verify_mode','SSL_verify_callback'};
     unless ($verify_mode == Net::SSLeay::VERIFY_NONE())

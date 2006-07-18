@@ -1,5 +1,10 @@
+v0.991
+        - sysread and syswrite ar no longer the same as read and write,
+          but can return already if only parts of the data are read
+          or written (which is the usual semantic for sysread and syswrite)
+          This should fix problems with HTTP::Daemon::SSL
 v0.99
-    - just upgrade Version number because I've screwed up upload
+        - just upgrade Version number because I've screwed up upload
 	  of v0.98 to cpan
 v0.98
 	- Maintainer changed to <Steffen_Ullrich at genua dot de>
