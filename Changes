@@ -1,3 +1,10 @@
+v0.993
+        - added SSL_cert and SSL_key parameter which do not take
+          a file name like SSL_cert_file and SSL_key_file but
+          an internal X509* resp. EVP_PKEY* value. Useful for
+          dynamically created certificates and keys.
+        - added test for sysread/syswrite behavior (which was changed
+          in v0.991)
 v0.992
         - _set_rw_error does $!||=EAGAIN only if error is one of 
           SSL_WANT_READ|SSL_WANT_WRITE (patch from Mike Smith 

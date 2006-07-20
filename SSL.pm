@@ -43,7 +43,7 @@ eval 'require Debug; Debug->import';
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.992';
+    $VERSION = '0.993';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -111,8 +111,6 @@ sub configure_SSL {
     my %default_args =
 	('Proto'         => 'tcp',
 	 'SSL_server'    => $is_server,
-	 'SSL_key_file'  => $is_server ? 'certs/server-key.pem'  : 'certs/client-key.pem',
-	 'SSL_cert_file' => $is_server ? 'certs/server-cert.pem' : 'certs/client-cert.pem',
 	 'SSL_ca_file'   => 'certs/my-ca.pem',
 	 'SSL_ca_path'   => 'ca/',
 	 'SSL_use_cert'  => $is_server,
@@ -121,7 +119,17 @@ sub configure_SSL {
 	 'SSL_verify_mode' => Net::SSLeay::VERIFY_NONE(),
 	 'SSL_verify_callback' => 0,
 	 'SSL_cipher_list' => 'ALL:!LOW:!EXP');
-
+     
+    # SSL_key_file and SSL_cert_file will only be set in defaults if 
+    # SSL_key|SSL_key_file resp SSL_cert|SSL_cert_file are not set in
+    # $args_hash
+    foreach my $k (qw( key cert )) {
+	next if exists $arg_hash->{ "SSL_${k}" };
+	next if exists $arg_hash->{ "SSL_${k}_file" };
+    	$default_args{ "SSL_${k}_file" } = $is_server 
+	    ?  "certs/server-${k}.pem" 
+	    :  "certs/client-${k}.pem";
+    }	
 
     #Replace nonexistent entries with defaults
     %$arg_hash = ( %default_args, %$GLOBAL_CONTEXT_ARGS, %$arg_hash );
@@ -136,7 +144,7 @@ sub configure_SSL {
     }
 
     ${*$self}{'_SSL_arguments'} = $arg_hash;
-    ${*$self}{'_SSL_ctx'} = new IO::Socket::SSL::SSL_Context($arg_hash) || return;
+    ${*$self}{'_SSL_ctx'} = IO::Socket::SSL::SSL_Context->new($arg_hash) || return;
     ${*$self}{'_SSL_opened'} = 1 if ($is_server);
 
     return $self;
@@ -710,8 +718,7 @@ use constant SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER => 2;
 # Note that the final object will actually be a reference to the scalar
 # (C-style pointer) returned by Net::SSLeay::CTX_*_new() so that
 # it can be blessed.
-sub new
-{
+sub new {
     my $class = shift;
     my $arg_hash = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
 
@@ -771,13 +778,31 @@ sub new
 	    Net::SSLeay::CTX_set_default_passwd_cb($ctx, $arg_hash->{'SSL_passwd_cb'});
 	}
 
-	Net::SSLeay::CTX_use_PrivateKey_file
-	    ($ctx, $arg_hash->{'SSL_key_file'}, $filetype)
-	    || return IO::Socket::SSL->error("Failed to open Private Key");
+	if ( my $pkey= $arg_hash->{SSL_key} ) {
+	    # binary, e.g. EVP_PKEY*
+	    Net::SSLeay::CTX_use_PrivateKey($ctx, $pkey)
+		|| return IO::Socket::SSL->error("Failed to use Private Key");
+	} elsif ( my $f = $arg_hash->{SSL_key_file} ) {
+	    Net::SSLeay::CTX_use_PrivateKey_file($ctx, $f, $filetype)
+		|| return IO::Socket::SSL->error("Failed to open Private Key");
+	}
 
-	Net::SSLeay::CTX_use_certificate_chain_file
-	    ($ctx, $arg_hash->{'SSL_cert_file'})
-	    || return IO::Socket::SSL->error("Failed to open Certificate");
+	if ( my $x509 = $arg_hash->{SSL_cert} ) {
+	    # binary, e.g. X509*
+	    # we habe either a single certificate or a list with
+	    # a chain of certificates
+	    my @x509 = ref($x509) eq 'ARRAY' ? @$x509: ($x509);
+	    my $cert = shift @x509;
+	    Net::SSLeay::CTX_use_certificate( $ctx,$cert ) 
+	    	|| return IO::Socket::SSL->error("Failed to use Certificate");
+	    foreach my $ca (@x509) {
+	    	Net::SSLeay::CTX_add_extra_chain_cert( $ctx,$ca ) 
+	    	    || return IO::Socket::SSL->error("Failed to use Certificate");
+	    }
+	} elsif ( my $f = $arg_hash->{SSL_cert_file} ) {
+	    Net::SSLeay::CTX_use_certificate_chain_file($ctx, $f)
+		|| return IO::Socket::SSL->error("Failed to open Certificate");
+	}
     }
 
     my $verify_callback = $verify_cb &&
@@ -802,7 +827,7 @@ sub new
 	    return IO::Socket::SSL->error("Session caches not supported for Net::SSLeay < v1.26");
 	} else {
 	    $ctx_object->{'session_cache'} =
-		new IO::Socket::SSL::Session_Cache($arg_hash) || undef;
+		IO::Socket::SSL::Session_Cache->new($arg_hash) || undef;
 	}
     }
 
@@ -979,6 +1004,13 @@ specify a different location.  Keys should be PEM formatted, and if they are
 encrypted, you will be prompted to enter a password before the socket is formed
 (unless you specified the SSL_passwd_cb option).
 
+=item SSL_key
+
+This is an EVP_PKEY* and can be used instead of SSL_key_file.
+Useful if you don't have your key in a file but create it dynamically or get it from
+a string (see openssl PEM_read_bio_PrivateKey etc for getting a EVP_PKEY* from
+a string).
+
 =item SSL_cert_file
 
 If your SSL certificate is not in the default place (F<certs/server-cert.pem> for servers,
@@ -986,6 +1018,14 @@ F<certs/client-cert.pem> for clients), then you should use this option to specif
 location of your certificate.  Note that a key and certificate are only required for an
 SSL server, so you do not need to bother with these trifling options should you be
 setting up an unauthenticated client.
+
+=item SSL_cert
+
+This is an X509* or an array of X509*.
+The first X509* is the internal representation of the certificate while the following
+ones are extra certificates. Useful if you create your certificate dynamically (like
+in a SSL intercepting proxy) or get it from a string (see openssl PEM_read_bio_X509 etc
+for getting a X509* from a string).
 
 =item SSL_passwd_cb
 
@@ -1211,7 +1251,7 @@ A few changes have gone into IO::Socket::SSL v0.93 and later with respect to
 return values.  The behavior on success remains unchanged, but for I<all> functions,
 the return value on error is now an empty list.  Therefore, the return value will be
 false in all contexts, but those who have been using the return values as arguments
-to subroutines (like C<mysub(new IO::Socket::SSL(...), ...)>) may run into problems.
+to subroutines (like C<mysub(IO::Socket::SSL(...)->new, ...)>) may run into problems.
 The moral of the story: I<always> check the return values of these functions before
 using them in any way that you consider meaningful.
 
@@ -1339,9 +1379,13 @@ IO::Socket::INET, IO::Socket::INET6, Net::SSLeay.
 
 =head1 AUTHORS
 
+Steffen Ullrich, <steffen at genua.de> is the current maintainer.
+
 Peter Behroozi, <behrooz at fas.harvard.edu> (Note the lack of an "i" at the end of "behrooz")
 
 Marko Asplund, <marko.asplund at kronodoc.fi>, was the original author of IO::Socket::SSL.
+
+Patches incorporated from various people, see file Changes.
 
 =head1 COPYRIGHT
 
