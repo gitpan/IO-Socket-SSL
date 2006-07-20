@@ -43,7 +43,7 @@ eval 'require Debug; Debug->import';
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.991';
+    $VERSION = '0.992';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -146,11 +146,11 @@ sub configure_SSL {
 sub _set_rw_error {
     my ($self,$ssl,$rv) = @_;
     my $err = Net::SSLeay::get_error($ssl,$rv);
-    $! ||= EAGAIN;
     $SSL_ERROR = 
 	$err == Net::SSLeay::ERROR_WANT_READ()  ? SSL_WANT_READ :
 	$err == Net::SSLeay::ERROR_WANT_WRITE() ? SSL_WANT_WRITE :
 	return;
+    $! ||= EAGAIN;
     ${*$self}{'_SSL_last_err'} = $SSL_ERROR if (ref($self));
     return 1;
 }

@@ -1,3 +1,10 @@
+v0.992
+        - _set_rw_error does $!||=EAGAIN only if error is one of 
+          SSL_WANT_READ|SSL_WANT_WRITE (patch from Mike Smith 
+          <mike at mailchannels dot com>)
+        - Fix Makefile.PL to allow detectection of failures in PREREQ_PM
+          (http://rt.cpan.org/Public/Bug/Display.html?id=20563, patch 
+          by alexchorny at gmail dot com)
 v0.991
         - sysread and syswrite ar no longer the same as read and write,
           but can return already if only parts of the data are read
