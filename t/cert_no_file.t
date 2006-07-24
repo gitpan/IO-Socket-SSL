@@ -11,9 +11,6 @@
 # and if SSL_key is an EVP_PKEY* but with the current function in
 # Net::SSLeay I don't see a way to test it
 
-eval 'use Debug';
-*{DEBUG} = sub {} if !defined(&DEBUG);
-
 use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
@@ -69,7 +66,7 @@ foreach my $test ( 1,2,3 ) {
 	next;
     };
     my ($port) = unpack_sockaddr_in( getsockname($server) );
-    DEBUG( "Server listening to $SSL_SERVER_ADDR:$port" );
+    #DEBUG( "Server listening to $SSL_SERVER_ADDR:$port" );
     ok("Server Initialization $spec");
     push @server,$server;
 

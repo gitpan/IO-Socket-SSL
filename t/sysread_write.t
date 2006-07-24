@@ -6,9 +6,6 @@
 # that the latter ones are blocking until they read/write everything while
 # the sys* function also can read/write partial data.
 
-eval 'use Debug';
-*{DEBUG} = sub {} if !defined(&DEBUG);
-
 use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
@@ -77,7 +74,7 @@ if ( $pid == 0 ) {
     	print "not ok: timed out\n";
 	exit;
     };
-    DEBUG( "send 2x512 byte" );
+    #DEBUG( "send 2x512 byte" );
     unless ( syswrite( $to_server, 'x' x 512 ) == 512 
     	and syswrite( $to_server, 'x' x 512 ) == 512 ) {
     	print "not ok: write to small: $!\n";
@@ -94,13 +91,13 @@ if ( $pid == 0 ) {
     # ssl message block size (16k for sslv3). It should send
     # only a partial packet of 16k
     my $n = syswrite( $to_server, 'x' x 18000 );
-    DEBUG( "send $n bytes" );
+    #DEBUG( "send $n bytes" );
     print "not " if $n != 16384;
     ok( "partial write in syswrite" );
 
     # but write should send everything because it does ssl_write_all
     $n = $to_server->write( 'x' x 18000 );
-    DEBUG( "send $n bytes" );
+    #DEBUG( "send $n bytes" );
     print "not " if $n != 18000;
     ok( "full write in write" );
 
@@ -124,7 +121,7 @@ if ( $pid == 0 ) {
     while ( $total > 0 ) {
 	#DEBUG( "reading 66 of $total bytes pending=".$to_client->pending() );
     	my $n = sysread( $to_client, my $buf,66 );
-	DEBUG( "read $n bytes" );
+	#DEBUG( "read $n bytes" );
 	if ( !$n ) {
 	    print "not ok: read failed: $!\n";
 	    kill(9,$pid);

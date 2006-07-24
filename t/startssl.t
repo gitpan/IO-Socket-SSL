@@ -2,8 +2,6 @@
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl t/nonblock.t'
 
-eval 'use Debug';
-*{DEBUG} = sub {} if !defined(&DEBUG);
 
 use Net::SSLeay;
 use Socket;
@@ -65,7 +63,7 @@ if ( $pid == 0 ) {
 	SSL_cipher_list => 'HIGH',
 	%extra_options
     )) {
-	DEBUG( $SSL_ERROR );
+	#DEBUG( $SSL_ERROR );
 	print "not ";
     }
     ok( "sslify client" );
@@ -99,14 +97,14 @@ IO::Socket::SSL->start_SSL( $csock,
     SSL_cipher_list => 'HIGH',
     %extra_options
 ) || print "not ";
-DEBUG( $IO::Socket::SSL::ERROR );
+#DEBUG( $IO::Socket::SSL::ERROR );
 ok( 'sslify server' );
 
 UNIVERSAL::isa( $csock,'IO::Socket::SSL' ) || print "not ";
 ok( 'server reblessed as IO::Socket::SSL' );
 
 my $l = <$csock>;
-DEBUG($l);
+#DEBUG($l);
 print "not " if $l ne "hannibal\n";
 ok( "received client message" );
 

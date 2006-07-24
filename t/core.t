@@ -2,8 +2,6 @@
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl t/core.t'
 
-eval 'use Debug';
-*{DEBUG} = sub {} if !defined(&DEBUG);
 
 use Net::SSLeay;
 use Socket;
@@ -354,7 +352,7 @@ if ($GUARANTEED_TO_HAVE_NONBLOCKING_SOCKETS) {
     IO::Select->new($server)->can_read(30);
     $client = $server->accept;
     while ( ! $client ) {
-	DEBUG( "$!,$SSL_ERROR" );
+	#DEBUG( "$!,$SSL_ERROR" );
 	if ( $! == EAGAIN ) {
 	    if ( $SSL_ERROR == SSL_WANT_WRITE ) {
     		IO::Select->new( $server->opening )->can_write(30);

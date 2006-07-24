@@ -1,3 +1,7 @@
+v0.994
+        - hide DEBUG statements and remove test to load Debug.pm
+          because packets like Spamassisin cannot cope with it
+          (at least the OpenBSD port)
 v0.993
         - added SSL_cert and SSL_key parameter which do not take
           a file name like SSL_cert_file and SSL_key_file but

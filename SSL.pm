@@ -23,9 +23,6 @@ use strict;
 
 use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 
-eval 'require Debug; Debug->import';
-*{DEBUG} = sub { warn "DEBUG: @_\n" if $DEBUG>=2 } if !defined(&DEBUG);
-
 {
     # These constants will be used in $! at return from SSL_connect, 
     # SSL_accept, generic_read and write, thus notifying the caller
@@ -43,7 +40,7 @@ eval 'require Debug; Debug->import';
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.993';
+    $VERSION = '0.994';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -175,9 +172,9 @@ sub connect {
 	# if this fails this might not be an error (e.g. if $! = EINPROGRESS
 	# and socket is nonblocking this is normal), so keep any error
 	# handling to the client
-	DEBUG( 'socket not yet connected' );
+	#DEBUG( 'socket not yet connected' );
 	$self->SUPER::connect(@_) || return;
-	DEBUG( 'socket connected' );
+	#DEBUG( 'socket connected' );
     }
     return $self->connect_SSL;
 }
@@ -189,7 +186,7 @@ sub connect_SSL {
     my ($ssl,$ctx);
     if ( ! ${*$self}{'_SSL_opening'} ) {
 	# start ssl connection
-	DEBUG( 'ssl handshake not started' );
+	#DEBUG( 'ssl handshake not started' );
 	${*$self}{'_SSL_opening'} = 1;
 	my $arg_hash = ${*$self}{'_SSL_arguments'};
 
@@ -213,16 +210,16 @@ sub connect_SSL {
     $ssl ||= ${*$self}{'_SSL_object'};
 
     $SSL_ERROR = undef;
-    DEBUG( 'calling ssleay::connect' );
+    #DEBUG( 'calling ssleay::connect' );
     my $rv = Net::SSLeay::connect($ssl);
-    DEBUG( "rv=$rv" );
+    #DEBUG( "rv=$rv" );
     if ( $rv < 0 ) {
 	unless ( $self->_set_rw_error( $ssl,$rv )) {
 	    $self->error("SSL connect attempt failed with unknown error");
 	    delete ${*$self}{'_SSL_opening'};
 	    return $self->fatal_ssl_error();
 	}
-	DEBUG( 'ssl handshake in progress' );
+	#DEBUG( 'ssl handshake in progress' );
 	return;
     } elsif ( $rv == 0 ) {
 	delete ${*$self}{'_SSL_opening'};
@@ -230,7 +227,7 @@ sub connect_SSL {
 	return $self->fatal_ssl_error();
     }
 
-    DEBUG( 'ssl handshake done' );
+    #DEBUG( 'ssl handshake done' );
     # ssl connect successful
     delete ${*$self}{'_SSL_opening'};
     ${*$self}{'_SSL_opened'}=1;
@@ -258,13 +255,13 @@ sub accept {
     my $socket = ${*$self}{'_SSL_opening'};
     if ( ! $socket ) {
 	# underlying socket not done
-	DEBUG( 'no socket yet' );
+	#DEBUG( 'no socket yet' );
 	$socket = $self->SUPER::accept($class) || return;
-	DEBUG( 'accept created normal socket '.$socket );
+	#DEBUG( 'accept created normal socket '.$socket );
     }
 
     $self->accept_SSL($socket) || return;
-    DEBUG( 'accept_SSL ok' );
+    #DEBUG( 'accept_SSL ok' );
 
     return wantarray ? ($socket, getpeername($socket) ) : $socket;
 }
@@ -275,7 +272,7 @@ sub accept_SSL {
 
     my $ssl;
     if ( ! ${*$self}{'_SSL_opening'} ) {
-	DEBUG( 'starting sslifying' );
+	#DEBUG( 'starting sslifying' );
 	${*$self}{'_SSL_opening'} = $socket;
 	my $arg_hash = ${*$self}{'_SSL_arguments'};
 	${*$socket}{'_SSL_arguments'} = { %$arg_hash, SSL_server => 0 };
@@ -297,9 +294,9 @@ sub accept_SSL {
     $ssl ||= ${*$socket}{'_SSL_object'};
 
     $SSL_ERROR = undef;
-    DEBUG( 'calling ssleay::accept' );
+    #DEBUG( 'calling ssleay::accept' );
     my $rv = Net::SSLeay::accept($ssl);
-    DEBUG( 'called ssleay::accept rv='.$rv );
+    #DEBUG( 'called ssleay::accept rv='.$rv );
     if ( $rv < 0 ) {
 	unless ( $self->_set_rw_error( $ssl,$rv )) {
 	    $self->error("SSL accept attempt failed with unknown error");
@@ -313,7 +310,7 @@ sub accept_SSL {
 	return $socket->fatal_ssl_error();
     }
 
-    DEBUG( 'handshake done, socket ready' );
+    #DEBUG( 'handshake done, socket ready' );
     # socket opened
     delete ${*$self}{'_SSL_opening'};
     ${*$socket}{'_SSL_opened'} = 1;
@@ -526,7 +523,7 @@ sub start_SSL {
     my $start_handshake = $arg_hash->{SSL_startHandshake};
     if ( ! defined($start_handshake) || $start_handshake ) {
 	# if we have no callback force blocking mode
-	DEBUG( "start handshake" );
+	#DEBUG( "start handshake" );
 	my $blocking = $socket->blocking(1);
 	my $result = ${*$socket}{'_SSL_arguments'}{SSL_server}
 	    ? $socket->accept_SSL
@@ -534,7 +531,7 @@ sub start_SSL {
 	$socket->blocking(0) if !$blocking;
     	return $result ? $socket : (bless($socket, $original_class) && ());
     } else {
-	DEBUG( "dont start handshake: $socket" );
+	#DEBUG( "dont start handshake: $socket" );
     	return $socket; # just return upgraded socket 
     }
 
