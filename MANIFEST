@@ -29,5 +29,6 @@ t/startssl.t
 t/sysread_write.t
 t/cert_no_file.t
 t/dhe.t
+t/readline.t
 util/export_certs.pl
 META.yml

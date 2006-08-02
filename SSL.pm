@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.996';
+    $VERSION = '0.997';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -435,10 +435,74 @@ sub readline {
     my $ssl = $self->_get_ssl_object || return;
 
     if (wantarray) {
-	return split (/^/, Net::SSLeay::ssl_read_all($ssl));
+	my ($buf,$err) = Net::SSLeay::ssl_read_all($ssl);
+	return $self->error( "SSL read error" ) if $err;
+	if ( !defined($/) ) {
+	    return $buf;
+	} elsif ( ref($/) ) {
+	    my $size = ${$/};
+	    die "bad value in ref \$/: $size" unless $size>0;
+	    return $buf=~m{\G(.{1,$size})}g;
+	} elsif ( $/ eq '' ) {
+	    return $buf =~m{\G(.*\n\n+|.+)}g;
+	} else {
+	    return $buf =~m{\G(.*$/|.+)}g;
+	}
     }
-    my $line = Net::SSLeay::ssl_read_until($ssl);
-    return ($line ne '') ? $line : $self->error("SSL read error");
+
+    if ( !defined($/) ) {
+	my ($buf,$err) = Net::SSLeay::ssl_read_all($ssl);
+	return $self->error( "SSL read error" ) if $err;
+	return $buf;
+    } elsif ( ref($/) ) {
+	my $size = ${$/};
+	die "bad value in ref \$/: $size" unless $size>0;
+	my ($buf,$err) = Net::SSLeay::ssl_read_all($ssl,$size);
+	return $self->error( "SSL read error" ) if $err;
+	return $buf;
+    } elsif ( $/ ne '' ) {
+    	my $line = Net::SSLeay::ssl_read_until($ssl,$/);
+	return $self->error( "SSL read error" ) if $line eq '';
+	return $line;
+    } else {
+	# $/ is ''
+	# ^.*?\n\n+, need peek to find all \n at the end
+    	die "empty \$/ is not supported if I don't have peek"
+	    if Net::SSLeay::OPENSSL_VERSION_NUMBER() < 0x0090601f;
+
+	# find first occurence of \n\n
+	my $buf = '';
+	my $eon = 0;
+	while (1) { 
+	    defined( Net::SSLeay::peek($ssl,1)) || last; # peek more, can block
+	    my $pending = Net::SSLeay::pending($ssl);
+	    $buf .= Net::SSLeay::peek( $ssl,$pending );  # will not block
+	    if ( !$eon ) {
+	    	my $pos = index( $buf,"\n\n");
+		next if $pos<0; # newlines not found
+		$eon = $pos+2;  # pos after second newline
+	    }
+	    # $eon >= 2  == bytes incl last known \n
+	    while ( index( $buf,"\n",$eon ) == $eon ) {
+	    	# the next char ist \n too
+		$eon++;
+	    }
+	    last if $eon < length($buf); # found last \n before end of buf
+	}
+	if ( $eon > 0 ) {
+	    # found something
+	    # readed peeked data until $eon from $ssl
+	    return Net::SSLeay::ssl_read_all( $ssl,$eon );
+	} else {
+	    # found nothing
+	    # return all what we have
+	    if ( my $l = length($buf)) {
+	    	return Net::SSLeay::ssl_read_all( $ssl,$l );
+	    } else {
+	    	return $self->error( "SSL read error" );
+	    }
+	}
+    }
 }
 
 sub close {

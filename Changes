@@ -1,3 +1,6 @@
+v0.997
+        - fix readline (e.g. getline,getlines,<>) so that it behaves
+          regarding $/ like written in the $/ dokumentation.
 v0.996
         - removed links and comments to inofficial release of
           Net::SSLeay, because there is a newer version already
