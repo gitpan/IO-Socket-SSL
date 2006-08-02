@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.995';
+    $VERSION = '0.996';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -1117,11 +1117,7 @@ positive cache size.  For successive connections, pass the SSL_reuse_ctx option 
 the new() calls (or use set_default_context()) to make use of the cached sessions.
 The session cache size refers to the number of unique host/port pairs that can be
 stored at one time; the oldest sessions in the cache will be removed if new ones are
-added.  This requires an unofficial patched version of Net::SSLeay to work; check
-the patches directory, or download the altered version at L<http://www.fas.harvard.edu/~behrooz/Net_SSLeay.pm-1.26.tar.gz>.
-I have contacted Sampo Kellomäki about the patch, and he has assured me that it
-will appear in the next official release, but that has (as of this writing) not
-yet seen the light of CPAN.
+added.  
 
 =item SSL_error_trap
 

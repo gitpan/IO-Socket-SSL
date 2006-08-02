@@ -1,3 +1,6 @@
+v0.996
+        - removed links and comments to inofficial release of
+          Net::SSLeay, because there is a newer version already
 v0.995
         - add support for Diffie Hellman Key Exchange.
           See parameter SSL_dh_file and SSL_dh.
