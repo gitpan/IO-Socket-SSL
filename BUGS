@@ -1,14 +1,7 @@
-None.  See documentation.
+None are known.  See documentation.
 
 Following are some common errors to watch out for:
 
-To use client-side session caching, you will have to apply the
-patch in the patches/ subdirectory to Net::SSLeay, or download
-the patched version at
-
-http://www.fas.harvard.edu/~behrooz/Net_SSLeay.pm-1.26.tar.gz
-
----------------------
 
 IO::Socket::SSL does not currently support using both IPv4 and IPv6 in
 the same program.  For a quick workaround, copy the module 'SSL.pm' to
@@ -66,5 +59,13 @@ chomp($var = $var = <$socket>);
 Any function that returns the value of <$socket> (in scalar context)
 unchanged will work.
 
+---------------------
+
+If you have 384-bit RSA keys you need to use Diffie Hellman Key Exchange.
+See the parameter SSL_dh_file or SSL_dh for how to use it and
+http://groups.google.de/group/mailing.openssl.users/msg/d60330cfa7a6034b
+for an explanation why you need it.
+
 -- 
 Peter Behroozi (behrooz at fas.harvard.edu)
+Steffen Ullrich (Steffen_Ullrich at genua.de)

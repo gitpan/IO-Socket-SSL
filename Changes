@@ -1,3 +1,6 @@
+v0.995
+        - add support for Diffie Hellman Key Exchange.
+          See parameter SSL_dh_file and SSL_dh.
 v0.994
         - hide DEBUG statements and remove test to load Debug.pm
           because packets like Spamassisin cannot cope with it

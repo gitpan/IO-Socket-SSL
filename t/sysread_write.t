@@ -1,6 +1,6 @@
 #!perl -w
 # Before `make install' is performed this script should be runnable with
-# `make test'. After `make install' it should work as `perl t/nonblock.t'
+# `make test'. After `make install' it should work as `perl t/sysread_write.t'
 
 # This tests that sysread/syswrite behave different to read/write, e.g.
 # that the latter ones are blocking until they read/write everything while

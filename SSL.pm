@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.994';
+    $VERSION = '0.995';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -800,6 +800,21 @@ sub new {
 	    Net::SSLeay::CTX_use_certificate_chain_file($ctx, $f)
 		|| return IO::Socket::SSL->error("Failed to open Certificate");
 	}
+
+	if ( my $dh = $arg_hash->{SSL_dh} ) {
+	    # binary, e.g. DH*
+	    Net::SSLeay::CTX_set_tmp_dh( $ctx,$dh )
+	    	|| return IO::Socket::SSL->error( "Failed to set DH from SSL_dh" );
+	} elsif ( my $f = $arg_hash->{SSL_dh_file} ) {
+	    my $bio = Net::SSLeay::BIO_new_file( $f,'r' ) 
+	    	|| return IO::Socket::SSL->error( "Failed to open DH file $f" );
+	    my $dh = Net::SSLeay::PEM_read_bio_DHparams($bio);
+	    Net::SSLeay::BIO_free($bio);
+	    $dh || return IO::Socket::SSL->error( "Failed to read PEM for DH from $f - wrong format?" );
+	    my $rv = Net::SSLeay::CTX_set_tmp_dh( $ctx,$dh );
+	    Net::SSLeay::DH_free( $dh );
+	    $rv || return IO::Socket::SSL->error( "Failed to set DH from $f" );
+	}
     }
 
     my $verify_callback = $verify_cb &&
@@ -1023,6 +1038,15 @@ The first X509* is the internal representation of the certificate while the foll
 ones are extra certificates. Useful if you create your certificate dynamically (like
 in a SSL intercepting proxy) or get it from a string (see openssl PEM_read_bio_X509 etc
 for getting a X509* from a string).
+
+=item SSL_dh_file
+
+If you want Diffie-Hellman key exchange you need to supply a suitable file here
+or use the SSL_dh parameter. See dhparam command in openssl for more information.
+
+=item SSL_dh
+
+Like SSL_dh_file, but instead of giving a file you use a preloaded or generated DH*.
 
 =item SSL_passwd_cb
 
