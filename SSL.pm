@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.997';
+    $VERSION = '0.998';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -217,6 +217,7 @@ sub connect_SSL {
 	unless ( $self->_set_rw_error( $ssl,$rv )) {
 	    $self->error("SSL connect attempt failed with unknown error");
 	    delete ${*$self}{'_SSL_opening'};
+	    ${*$self}{'_SSL_opened'} = 1;
 	    return $self->fatal_ssl_error();
 	}
 	#DEBUG( 'ssl handshake in progress' );
@@ -224,6 +225,7 @@ sub connect_SSL {
     } elsif ( $rv == 0 ) {
 	delete ${*$self}{'_SSL_opening'};
 	$self->error("SSL connect attempt failed because of handshake problems" );
+	${*$self}{'_SSL_opened'} = 1;
 	return $self->fatal_ssl_error();
     }
 
@@ -298,15 +300,17 @@ sub accept_SSL {
     my $rv = Net::SSLeay::accept($ssl);
     #DEBUG( 'called ssleay::accept rv='.$rv );
     if ( $rv < 0 ) {
-	unless ( $self->_set_rw_error( $ssl,$rv )) {
-	    $self->error("SSL accept attempt failed with unknown error");
+	unless ( $socket->_set_rw_error( $ssl,$rv )) {
+	    $socket->error("SSL accept attempt failed with unknown error");
 	    delete ${*$self}{'_SSL_opening'};
+    	    ${*$socket}{'_SSL_opened'} = 1;
 	    return $socket->fatal_ssl_error();
 	}
 	return;
     } elsif ( $rv == 0 ) {
-	$self->error("SSL connect accept failed because of handshake problems" );
+	$socket->error("SSL connect accept failed because of handshake problems" );
 	delete ${*$self}{'_SSL_opening'};
+	${*$socket}{'_SSL_opened'} = 1;
 	return $socket->fatal_ssl_error();
     }
 
@@ -1392,18 +1396,10 @@ See the 'example' directory.
 
 =head1 BUGS
 
-I have never shipped a module with a known bug, and IO::Socket::SSL is no
-different.  If you feel that you have found a bug in the module and you are
-using the latest versions of Net::SSLeay and OpenSSL, send an email immediately to
-<behrooz at fas.harvard.edu> with a subject of 'IO::Socket::SSL Bug'.  Until very
-recently, I did not receive any indication when a bug was submitted to the CPAN
-request tracker, so e-mail is a much more reliable tool.  I am
-I<not responsible> for problems in your code, so make sure that an example
-actually works before sending it. It is merely acceptable if you send me a bug
-report, it is better if you send a small chunk of code that points it out,
-and it is best if you send a patch--if the patch is good, you might see a release the
-next day on CPAN. Otherwise, it could take weeks . . .
-
+IO::Socket::SSL is not threadsafe.
+This is because IO::Socket::SSL is based on Net::SSLeay which 
+uses a global object to access some of the API of openssl
+and is therefore not threadsafe.
 
 =head1 LIMITATIONS
 
@@ -1469,6 +1465,8 @@ Marko Asplund, <marko.asplund at kronodoc.fi>, was the original author of IO::So
 Patches incorporated from various people, see file Changes.
 
 =head1 COPYRIGHT
+
+Working support for non-blocking was added by Steffen Ullrich.
 
 The rewrite of this module is Copyright (C) 2002-2005 Peter Behroozi.
 

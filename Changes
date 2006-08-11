@@ -1,3 +1,11 @@
+v0.998
+	- declare socket as opened before calling fatal_ssl_error
+	  because the SSL_error_trap set up from HTTP::Daemon
+	  needs this
+	- accept_SSL sets errors on $socket (the accepted socket)
+	  not $self (the listening socket if called from accept)
+	  so it can be queried from SSL_error_trap
+	- note in BUGS section that IO::Socket::SSL is not thread-safe
 v0.997
         - fix readline (e.g. getline,getlines,<>) so that it behaves
           regarding $/ like written in the $/ dokumentation.
