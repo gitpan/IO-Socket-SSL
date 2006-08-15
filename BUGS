@@ -2,6 +2,15 @@ See documentation.
 Following are some common errors to watch out for:
 
 
+If you get an SSL connection but not certificate you might check
+the cipher with Net::SSLeay::get_cipher( $socket->_get_ssl_object ).
+If it is something like 'ADH-AES256-SHA' you should try to disable
+ADH in your cipherlist, e.g. set SSL_cipherlist to 'ALL:!ADH'
+or just leave it empty so that it uses the openssl default
+which does not include ADH.
+
+---------------------
+
 IO::Socket::SSL does not currently support using both IPv4 and IPv6 in
 the same program.  For a quick workaround, copy the module 'SSL.pm' to
 another named 'SSL6.pm' and adjust the package declaration

@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.998';
+    $VERSION = '0.999';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -115,7 +115,7 @@ sub configure_SSL {
 	 'SSL_version'   => 'sslv23',
 	 'SSL_verify_mode' => Net::SSLeay::VERIFY_NONE(),
 	 'SSL_verify_callback' => 0,
-	 'SSL_cipher_list' => 'ALL:!LOW:!EXP');
+    );
      
     # SSL_key_file and SSL_cert_file will only be set in defaults if 
     # SSL_key|SSL_key_file resp SSL_cert|SSL_cert_file are not set in
@@ -200,8 +200,10 @@ sub connect_SSL {
 	Net::SSLeay::set_fd($ssl, $fileno)
 	    || return $self->error("SSL filehandle association failed");
 
-	Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
-	    || return $self->error("Failed to set SSL cipher list");
+	if ( my $cl = $arg_hash->{SSL_cipher_list} ) {
+	    Net::SSLeay::set_cipher_list($ssl, $cl )
+	    	|| return $self->error("Failed to set SSL cipher list");
+	}
 
 	my $session = $ctx->session_cache( $arg_hash->{PeerAddr}, $arg_hash->{PeerPort} );
 	Net::SSLeay::set_session($ssl, $session) if ($session);
@@ -289,8 +291,10 @@ sub accept_SSL {
 	Net::SSLeay::set_fd($ssl, $fileno)
 	    || return $socket->error("SSL filehandle association failed");
 
-	Net::SSLeay::set_cipher_list($ssl, $arg_hash->{'SSL_cipher_list'})
-	    || return $socket->error("Failed to set SSL cipher list");
+	if ( my $cl = $arg_hash->{SSL_cipher_list} ) {
+	    Net::SSLeay::set_cipher_list($ssl, $cl )
+		|| return $socket->error("Failed to set SSL cipher list");
+	}
     }
 
     $ssl ||= ${*$socket}{'_SSL_object'};
@@ -1066,9 +1070,12 @@ which auto-negotiates between SSLv2 and SSLv3.  You may specify 'SSLv2', 'SSLv3'
 
 =item SSL_cipher_list
 
-If you do not care for the default list of ciphers ('ALL:!LOW:!EXP'), then look in
-the OpenSSL documentation (L<http://www.openssl.org/docs/apps/ciphers.html#CIPHER_STRINGS>),
-and specify a different set with this option.
+If this option is set the cipher list for the connection will be set to the
+given value, e.g. something like 'ALL:!LOW:!EXP:!ADH'. Look into the OpenSSL 
+documentation (L<http://www.openssl.org/docs/apps/ciphers.html#CIPHER_STRINGS>)
+for more details.
+If this option is not used the openssl builtin default is used which is suitable
+for most cases.
 
 =item SSL_use_cert
 

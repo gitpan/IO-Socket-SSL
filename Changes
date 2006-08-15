@@ -1,3 +1,8 @@
+v0.999
+	- If SSL_cipher_list is not given it uses the openssl
+	  default instead of setting it to 'ALL:!LOW:!EXP' like
+	  before. The old value included ADH and this might be
+	  a bad idea, see BUGS why.
 v0.998
 	- declare socket as opened before calling fatal_ssl_error
 	  because the SSL_error_trap set up from HTTP::Daemon
