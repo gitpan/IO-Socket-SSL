@@ -1,3 +1,9 @@
+v1.0
+	- fix depreciated and practically undocumented function 
+          get_peer_certificate so that LWP Net::HTTPS works again
+        - set arg 'Blocking' while calling SUPER::configure only
+          if it was set by the caller to work around Problem in LWP
+          Net::HTTPS
 v0.999
 	- If SSL_cipher_list is not given it uses the openssl
 	  default instead of setting it to 'ALL:!LOW:!EXP' like

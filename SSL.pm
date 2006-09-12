@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '0.999';
+    $VERSION = '1.0';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -90,7 +90,11 @@ sub configure {
     # for real nonblocking behavior one should create a nonblocking
     # socket and later call connect explicitly
     my $blocking = delete $arg_hash->{Blocking};
-    $arg_hash->{Blocking} = 1;
+
+    # because Net::HTTPS simple redefines blocking() to {} (e.g
+    # return undef) and IO::Socket::INET does not like this we
+    # set Blocking only explicitly if it was set
+    $arg_hash->{Blocking} = 1 if defined ($blocking);
 
     $self->configure_SSL($arg_hash) || return;
 
@@ -699,7 +703,7 @@ sub socketToSSL { IO::Socket::SSL->start_SSL(@_); }
 
 sub issuer_name { return(shift()->peer_certificate("issuer")) }
 sub subject_name { return(shift()->peer_certificate("subject")) }
-sub get_peer_certificate { return shift()->peer_certificate() }
+sub get_peer_certificate { return shift() }
 
 sub context_init {
     return($GLOBAL_CONTEXT_ARGS = (ref($_[0]) eq 'HASH') ? $_[0] : {@_});
@@ -1428,18 +1432,27 @@ The following functions are deprecated and are only retained for compatibility:
 
 =item context_init()
 
-(use the SSL_reuse_ctx option if you want to re-use a context)
+use the SSL_reuse_ctx option if you want to re-use a context
 
 
 =item socketToSSL() and socket_to_SSL()
 
-(use IO::Socket::SSL->start_SSL() instead)
+use IO::Socket::SSL->start_SSL() instead
 
 
-=item get_peer_certificate() and friends
+=item get_peer_certificate()
 
-(use the peer_certificate() function instead)
+use the peer_certificate() function instead.
+Used to return X509_Certificate with methods subject_name and issuer_name.
+Now simply returns $self which has these methods (although depreceated).
 
+=item issuer_name()
+
+use peer_certificate( 'issuer' ) instead
+
+=item subject_name()
+
+use peer_certificate( 'subject' ) instead
 
 =back
 
