@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.0';
+    $VERSION = '1.01';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -416,7 +416,7 @@ sub generic_write {
 # if all data are written
 sub write {
     my $self = shift;
-    return $self->generic_write( $self->blocking,@_ );
+    return $self->generic_write( scalar($self->blocking),@_ );
 }
 
 # contrary to write syswrite() returns already if only

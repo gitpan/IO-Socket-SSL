@@ -1,3 +1,8 @@
+v1.01
+	- work around Bug in Net::HTTPS where it defines sub blocking
+          as {}, e.g. force scalar context when calling sub blocking
+          (in IO::Socket::SSL::write)
+          see http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=383106
 v1.0
 	- fix depreciated and practically undocumented function 
           get_peer_certificate so that LWP Net::HTTPS works again
