@@ -40,7 +40,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.01';
+    $VERSION = '1.02';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -748,6 +748,7 @@ sub recv   { croak("Use of recv() not implemented in IO::Socket::SSL; use read/s
 package IO::Socket::SSL::SSL_HANDLE;
 use strict;
 use vars qw($HAVE_WEAKREF);
+use Errno 'EBADF';
 
 BEGIN {
     local ($@, $SIG{__DIE__});
@@ -773,6 +774,9 @@ sub PRINTF   { ${shift()}->printf   (@_) }
 sub WRITE    { ${shift()}->syswrite (@_) }
 
 sub FILENO   { ${shift()}->fileno   (@_) }
+
+sub TELL     { $! = EBADF; return -1 }
+sub BINMODE  { return 0 }  # not perfect, but better than not implementing the method
 
 sub CLOSE {                          #<---- Do not change this function!
     my $ssl = ${$_[0]};
@@ -1411,6 +1415,9 @@ IO::Socket::SSL is not threadsafe.
 This is because IO::Socket::SSL is based on Net::SSLeay which 
 uses a global object to access some of the API of openssl
 and is therefore not threadsafe.
+
+IO::Socket::SSL does not work together with Storable::fd_retrieve/fd_store.
+See BUGS file for more information and how to work around the problem.
 
 =head1 LIMITATIONS
 

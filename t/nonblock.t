@@ -10,7 +10,7 @@ use IO::Select;
 use Errno qw( EAGAIN EINPROGRESS EPIPE ECONNRESET );
 use strict;
 
-use vars qw( $SSL_SERVER_PORT $SSL_SERVER_ADDR );
+use vars qw( $SSL_SERVER_ADDR );
 do "t/ssl_settings.req" || do "ssl_settings.req";
 
 if ( ! eval "use 5.006; use IO::Select; return 1" ) {
@@ -44,7 +44,6 @@ my %extra_options = $Net::SSLeay::VERSION>=1.16 ?
 my $ID = 'server';
 my $server = IO::Socket::INET->new(
     Blocking => 0,
-    LocalPort => $SSL_SERVER_PORT,
     LocalAddr => $SSL_SERVER_ADDR,
     Listen => 2,
     ReuseAddr => 1,
@@ -53,7 +52,7 @@ my $server = IO::Socket::INET->new(
 print "not ok: $!\n", exit if !$server; # Address in use?
 ok("Server Initialization");
 
-
+my ($SSL_SERVER_PORT) = unpack_sockaddr_in( $server->sockname );
 
 defined( my $pid = fork() ) || die $!;
 if ( $pid == 0 ) {

@@ -4,15 +4,16 @@
 use IO::Socket::SSL;
 eval {require "t/ssl_settings.req";} ||
 eval {require "ssl_settings.req";};
-use vars qw($SSL_SERVER_PORT $SSL_SERVER_ADDR);
+use vars qw($SSL_SERVER_ADDR);
 
 print "1..1\n";
 
 $test=1;
-my $server = new IO::Socket::INET(LocalPort => $SSL_SERVER_PORT,
-	                          LocalAddr => $SSL_SERVER_ADDR,
-				  Listen => 1,
-				  ReuseAddr => 1);
+my $server = IO::Socket::INET->new( 
+    # pick any port on LocalAddr
+    LocalAddr => $SSL_SERVER_ADDR,
+    Listen => 1
+);
 
 if (!$server) {
     print "Bail out! ";

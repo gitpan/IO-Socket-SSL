@@ -47,19 +47,20 @@ print "1..$numtests\n";
     (SSL_key_file => "certs/client-key.pem");
 
 
-my $server = new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT,
-				 LocalAddr => $SSL_SERVER_ADDR,
-				 Listen => 2,
-				 Timeout => 30,
-				 ReuseAddr => 1,
-				 SSL_verify_mode => 0x00,
-				 SSL_ca_file => "certs/test-ca.pem",
-				 SSL_use_cert => 1,
-				 SSL_cert_file => "certs/client-cert.pem",
-				 SSL_version => 'TLSv1',
-				 SSL_cipher_list => 'HIGH',
-				 SSL_error_trap => \&error_trap,
-				 %extra_options);
+my $server = IO::Socket::SSL->new(
+    LocalAddr => $SSL_SERVER_ADDR,
+    Listen => 2,
+    Timeout => 30,
+    ReuseAddr => 1,
+    SSL_verify_mode => 0x00,
+    SSL_ca_file => "certs/test-ca.pem",
+    SSL_use_cert => 1,
+    SSL_cert_file => "certs/client-cert.pem",
+    SSL_version => 'TLSv1',
+    SSL_cipher_list => 'HIGH',
+    SSL_error_trap => \&error_trap,
+    %extra_options
+);
 
 if (!$server) {
     print "not ok\n";
@@ -69,6 +70,9 @@ if (!$server) {
 
 print "not " if (!defined fileno($server));
 &ok("Server Fileno Check");
+
+my ($SSL_SERVER_PORT) = unpack_sockaddr_in( $server->sockname );
+
 
 
 unless (fork) {

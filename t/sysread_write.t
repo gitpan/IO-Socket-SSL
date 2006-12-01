@@ -11,7 +11,7 @@ use Socket;
 use IO::Socket::SSL;
 use strict;
 
-use vars qw( $SSL_SERVER_PORT $SSL_SERVER_ADDR );
+use vars qw( $SSL_SERVER_ADDR );
 do "t/ssl_settings.req" || do "ssl_settings.req";
 
 if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
@@ -30,7 +30,6 @@ print "1..9\n";
 # first create simple ssl-server
 my $ID = 'server';
 my $server = IO::Socket::SSL->new(
-    LocalPort => $SSL_SERVER_PORT,
     LocalAddr => $SSL_SERVER_ADDR,
     Listen => 2,
     ReuseAddr => 1,
@@ -44,6 +43,7 @@ my $server = IO::Socket::SSL->new(
 print "not ok: $!\n", exit if !$server; # Address in use?
 ok("Server Initialization");
 
+my ($SSL_SERVER_PORT) = unpack_sockaddr_in( $server->sockname );
 
 defined( my $pid = fork() ) || die $!;
 if ( $pid == 0 ) {

@@ -3,6 +3,7 @@
 # `make test'. After `make install' it should work as `perl t/core.t'
 
 use Net::SSLeay;
+use Socket;
 use IO::Socket::SSL;
 eval {require "t/ssl_settings.req";} ||
 eval {require "ssl_settings.req";};
@@ -42,15 +43,20 @@ my %server_options =
      SSL_cipher_list => 'HIGH');
 
 
-my @servers = (new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT,  %server_options),
-	       new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT2, %server_options),
-	       new IO::Socket::SSL(LocalPort => $SSL_SERVER_PORT3, %server_options));
+my @servers = (IO::Socket::SSL->new( %server_options),
+	       IO::Socket::SSL->new( %server_options),
+	       IO::Socket::SSL->new( %server_options));
 
 if (!$servers[0] or !$servers[1] or !$servers[2]) {
     print "not ok # Server init\n";
     exit;
 }
 &ok("Server initialization");
+
+my ($SSL_SERVER_PORT)  = unpack_sockaddr_in( $servers[0]->sockname );
+my ($SSL_SERVER_PORT2) = unpack_sockaddr_in( $servers[1]->sockname );
+my ($SSL_SERVER_PORT3) = unpack_sockaddr_in( $servers[2]->sockname );
+
 
 unless (fork) {
     close $_ foreach @servers;

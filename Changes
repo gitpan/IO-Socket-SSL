@@ -1,3 +1,10 @@
+v1.02
+	- added some info to BUGS and to BUGS section of pod
+	- added TELL and BINMODE to IO::Socket::SSL::SSL_HANDLE, even
+          if they do nothing useful.
+	- all tests allocate now the ports dynamically, so there should
+          be no longer a conflict with open ports on the system where
+          the tests run
 v1.01
 	- work around Bug in Net::HTTPS where it defines sub blocking
           as {}, e.g. force scalar context when calling sub blocking

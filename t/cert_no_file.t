@@ -16,7 +16,7 @@ use Socket;
 use IO::Socket::SSL;
 use strict;
 
-use vars qw( $SSL_SERVER_PORT $SSL_SERVER_ADDR );
+use vars qw( $SSL_SERVER_ADDR );
 do "t/ssl_settings.req" || do "ssl_settings.req";
 
 if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {

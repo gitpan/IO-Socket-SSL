@@ -3,6 +3,7 @@
 # `make test'. After `make install' it should work as `perl t/compatibility.t'
 
 use IO::Socket::SSL;
+use Socket;
 eval {require "t/ssl_settings.req";} ||
 eval {require "ssl_settings.req";};
 
@@ -21,10 +22,11 @@ print "1..9\n";
 IO::Socket::SSL::context_init(SSL_verify_mode => 0x01, SSL_version => 'TLSv1' );
 
 
-my $server = new IO::Socket::INET(LocalPort => $SSL_SERVER_PORT,
-	                          LocalAddr => $SSL_SERVER_ADDR,
-				  Listen => 1,
-				  Proto => 'tcp', ReuseAddr => 1, Timeout => 15);
+my $server = IO::Socket::INET->new(
+    LocalAddr => $SSL_SERVER_ADDR,
+    Listen => 1,
+    Proto => 'tcp', ReuseAddr => 1, Timeout => 15
+);
 
 if (!$server) {
     print "Bail out! ";
@@ -33,6 +35,8 @@ if (!$server) {
 	  "ssl_settings.req in the t/ directory.");
     exit;
 }
+
+my ($SSL_SERVER_PORT) = unpack_sockaddr_in( $server->sockname );
 
 print "ok\n";
 
