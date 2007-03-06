@@ -4,7 +4,8 @@
 #    a drop-in replacement for IO::Socket::INET that encapsulates
 #    data passed over a network with SSL.
 #
-# Current Code Shepherd: Peter Behroozi, <behrooz at fas.harvard.edu>
+# Current Code Shepherd: Steffen Ullrich <steffen at genua.de>
+# Code Shepherd before: Peter Behroozi, <behrooz at fas.harvard.edu>
 #
 # The original version of this module was written by 
 # Marko Asplund, <marko.asplund at kronodoc.fi>, who drew from
@@ -40,7 +41,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.02';
+    $VERSION = '1.03';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -55,6 +56,8 @@ BEGIN {
     Net::SSLeay::randomize();
 
 }
+
+sub CLONE_SKIP { 1 }
 
 # Export some stuff
 # inet4|inet6|debug will be handeled by myself, everything
@@ -759,6 +762,8 @@ BEGIN {
     $HAVE_WEAKREF = $@ ? 0 : 1;
 }
 
+sub CLONE_SKIP { 1 }
+
 sub TIEHANDLE {
     my ($class, $handle) = @_;
     weaken($handle) if $HAVE_WEAKREF;
@@ -791,6 +796,8 @@ use strict;
 # should be better taken from Net::SSLeay, but they are not (yet) defined there
 use constant SSL_MODE_ENABLE_PARTIAL_WRITE => 1;
 use constant SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER => 2;
+
+sub CLONE_SKIP { 1 }
 
 # Note that the final object will actually be a reference to the scalar
 # (C-style pointer) returned by Net::SSLeay::CTX_*_new() so that
@@ -954,6 +961,8 @@ sub DESTROY {
 
 package IO::Socket::SSL::Session_Cache;
 use strict;
+
+sub CLONE_SKIP { 1 }
 
 sub new {
     my ($class, $arg_hash) = @_;

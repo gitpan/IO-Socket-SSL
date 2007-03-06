@@ -1,3 +1,6 @@
+v1.03
+        - add CLONE_SKIP as proposed by 
+          Jarrod Johnson jbjohnso at us dot ibm dot com
 v1.02
 	- added some info to BUGS and to BUGS section of pod
 	- added TELL and BINMODE to IO::Socket::SSL::SSL_HANDLE, even
