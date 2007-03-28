@@ -1,3 +1,11 @@
+v1.04
+        - added way to create SSL object with predefined session
+	  cache, thus making it possible to share the cache between
+	  objects even if the rest of the context is not shared
+          key SSL_session_cache
+          Note that the arguments of IO::Socket::SSL::SessionCache::new
+          changed (but you should never have used this class directly
+          because it's internal to IO::Socket::SSL)
 v1.03
         - add CLONE_SKIP as proposed by 
           Jarrod Johnson jbjohnso at us dot ibm dot com

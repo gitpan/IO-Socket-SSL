@@ -41,7 +41,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.03';
+    $VERSION = '1.04';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -716,6 +716,10 @@ sub set_default_context {
     $GLOBAL_CONTEXT_ARGS->{'SSL_reuse_ctx'} = shift;
 }
 
+sub set_default_session_cache {
+    $GLOBAL_CONTEXT_ARGS->{SSL_session_cache} = shift;
+}
+
 
 sub opened {
     my $self = shift;
@@ -921,13 +925,13 @@ sub new {
     Net::SSLeay::CTX_set_verify($ctx, $verify_mode, $verify_callback);
 
     $ctx_object = { context => $ctx };
-    if ($arg_hash->{'SSL_session_cache_size'}) {
-	if ($Net::SSLeay::VERSION < 1.26) {
-	    return IO::Socket::SSL->error("Session caches not supported for Net::SSLeay < v1.26");
-	} else {
-	    $ctx_object->{'session_cache'} =
-		IO::Socket::SSL::Session_Cache->new($arg_hash) || undef;
-	}
+    if ( my $cache = $arg_hash->{SSL_session_cache} ) {
+	# use predefined cache
+    	$ctx_object->{session_cache} = $cache
+    } elsif ( my $size = $arg_hash->{SSL_session_cache_size}) {
+	return IO::Socket::SSL->error("Session caches not supported for Net::SSLeay < v1.26")
+		if $Net::SSLeay::VERSION < 1.26;
+	$ctx_object->{session_cache} = IO::Socket::SSL::Session_Cache->new( $size );
     }
 
     return bless $ctx_object, $class;
@@ -936,19 +940,16 @@ sub new {
 
 sub session_cache {
     my $ctx = shift;
-    my $cache = $ctx->{'session_cache'};
-    return unless defined $cache;
-    my ($addr, $port) = (shift, shift);
+    my $cache = $ctx->{'session_cache'} || return;
+    my ($addr,$port,$session) = @_;
     my $key = "$addr:$port";
-    my $session = shift;
-
-    return (defined($session) ? $cache->add_session($key, $session)
-			      : $cache->get_session($key));
+    return defined($session) 
+    	? $cache->add_session($key, $session)
+	: $cache->get_session($key);
 }
 
 sub has_session_cache {
-    my $ctx = shift;
-    return (defined $ctx->{'session_cache'});
+    return defined shift->{session_cache};
 }
 
 
@@ -965,10 +966,9 @@ use strict;
 sub CLONE_SKIP { 1 }
 
 sub new {
-    my ($class, $arg_hash) = @_;
-    my $cache = { _maxsize => $arg_hash->{'SSL_session_cache_size'}};
-    return unless ($cache->{_maxsize} > 0);
-    return bless $cache, $class;
+    my ($class, $size) = @_;
+    $size>0 or return;
+    return bless { _maxsize => $size }, $class;
 }
 
 
@@ -987,12 +987,11 @@ sub get_session {
 
 sub add_session {
     my ($self, $key, $val) = @_;
-
     return if ($key eq '_maxsize' or $key eq '_head');
 
     if ((keys %$self) > $self->{'_maxsize'} + 1) {
 	my $last = $self->{'_head'}->{prev};
-	&Net::SSLeay::SESSION_free($last->{session});
+	Net::SSLeay::SESSION_free($last->{session});
 	delete($self->{$last->{key}});
 	$self->{'_head'}->{prev} = $self->{'_head'}->{prev}->{prev};
 	delete($self->{'_head'}) if ($self->{'_maxsize'} == 1);
@@ -1211,6 +1210,18 @@ The session cache size refers to the number of unique host/port pairs that can b
 stored at one time; the oldest sessions in the cache will be removed if new ones are
 added.  
 
+=item SSL_session_cache
+
+Specifies session cache object which should be used instead of creating a new.
+Overrules SSL_session_cache_size.
+This option is useful if you wan't to reuse the cache, but not the rest of
+the context.
+
+A session cache object can be created using 
+C<< IO::Socket::SSL::Session_Cache->new( cachesize ) >>.
+
+Use set_default_session_cache() to set a global cache object.
+
 =item SSL_error_trap
 
 When using the accept() or connect() methods, it may be the case that the
@@ -1324,6 +1335,16 @@ specifically overridden in a call to new()).  It accepts one argument, which sho
 be either an IO::Socket::SSL object or an IO::Socket::SSL::SSL_Context object.  See
 the SSL_reuse_ctx option of new() for more details.  Note that this sets the default
 context globally, so use with caution (esp. in mod_perl scripts).
+
+=item B<IO::Socket::SSL::set_default_session_cache(...)>
+
+You may use this to make IO::Socket::SSL automatically re-use a given session cache
+(unless specifically overridden in a call to new()).  It accepts one argument, which should
+be an IO::Socket::SSL::SessionCache object or similar (e.g something which implements
+get_session and set_session like IO::Socket::SSL::SessionCache does).
+See the SSL_session_cache option of new() for more details.  Note that this sets the default
+cache globally, so use with caution.
+
 
 =back
 
