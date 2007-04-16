@@ -1,3 +1,8 @@
+v1.05
+        - make session cache working even if the IO::Socket::SSL object
+          was not created with IO::Socket::SSL->new but with
+          IO::Socket::SSL->start_SSL on an established socket
+
 v1.04
         - added way to create SSL object with predefined session
 	  cache, thus making it possible to share the cache between

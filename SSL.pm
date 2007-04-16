@@ -41,7 +41,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.04';
+    $VERSION = '1.05';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -212,6 +212,7 @@ sub connect_SSL {
 	    	|| return $self->error("Failed to set SSL cipher list");
 	}
 
+	$arg_hash->{PeerAddr} || $self->_update_peer;
 	my $session = $ctx->session_cache( $arg_hash->{PeerAddr}, $arg_hash->{PeerPort} );
 	Net::SSLeay::set_session($ssl, $session) if ($session);
     }
@@ -246,6 +247,7 @@ sub connect_SSL {
     $ctx ||= ${*$self}{'_SSL_ctx'};
     if ( $ctx->has_session_cache ) {
 	my $arg_hash = ${*$self}{'_SSL_arguments'};
+	$arg_hash->{PeerAddr} || $self->_update_peer;
 	my ($addr,$port) = ( $arg_hash->{PeerAddr}, $arg_hash->{PeerPort} );
 	my $session = $ctx->session_cache( $addr,$port );
 	$ctx->session_cache( $addr,$port, Net::SSLeay::get1_session($ssl) ) if !$session;
@@ -256,6 +258,18 @@ sub connect_SSL {
     return $self;
 }
 
+# called if PeerAddr is not set in ${*$self}{'_SSL_arguments'}
+# this can be the case if start_SSL is called with a normal IO::Socket::INET
+# so that PeerAddr|PeerPort are not set from args
+sub _update_peer {
+    my $self = shift;
+    my $arg_hash = ${*$self}{'_SSL_arguments'};
+	eval {
+		my ($port,$addr) = sockaddr_in( getpeername( $self ));
+		$arg_hash->{PeerAddr} = inet_ntoa( $addr );
+		$arg_hash->{PeerPort} = $port;
+	}
+}
 
 #Call to accept occurs when a new client connects to a server using
 #IO::Socket::SSL
@@ -1340,8 +1354,8 @@ context globally, so use with caution (esp. in mod_perl scripts).
 
 You may use this to make IO::Socket::SSL automatically re-use a given session cache
 (unless specifically overridden in a call to new()).  It accepts one argument, which should
-be an IO::Socket::SSL::SessionCache object or similar (e.g something which implements
-get_session and set_session like IO::Socket::SSL::SessionCache does).
+be an IO::Socket::SSL::Session_Cache object or similar (e.g something which implements
+get_session and add_session like IO::Socket::SSL::Session_Cache does).
 See the SSL_session_cache option of new() for more details.  Note that this sets the default
 cache globally, so use with caution.
 

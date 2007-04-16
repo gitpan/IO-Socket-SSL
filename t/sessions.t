@@ -120,10 +120,15 @@ unless (fork) {
 
     IO::Socket::SSL::set_default_context($ctx);
 
-    my @clients = (new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR, PeerPort => $SSL_SERVER_PORT),
-		   new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR, PeerPort => $SSL_SERVER_PORT2),
-		   new IO::Socket::SSL(PeerAddr => $SSL_SERVER_ADDR, PeerPort => $SSL_SERVER_PORT3));
-
+    my $sock3 = IO::Socket::INET->new(
+    	PeerAddr => $SSL_SERVER_ADDR,
+	PeerPort => $SSL_SERVER_PORT3
+    );
+    my @clients = (
+	IO::Socket::SSL->new(PeerAddr => $SSL_SERVER_ADDR, PeerPort => $SSL_SERVER_PORT),
+        IO::Socket::SSL->new(PeerAddr => $SSL_SERVER_ADDR, PeerPort => $SSL_SERVER_PORT2),
+        IO::Socket::SSL->start_SSL( $sock3 ),
+    );
     
     if (!$clients[0] or !$clients[1] or !$clients[2]) {
 	print "not ok \# Client init\n";
