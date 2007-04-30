@@ -41,7 +41,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.05';
+    $VERSION = '1.06';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -139,7 +139,7 @@ sub configure_SSL {
     %$arg_hash = ( %default_args, %$GLOBAL_CONTEXT_ARGS, %$arg_hash );
 
     #Avoid passing undef arguments to Net::SSLeay
-    !defined($arg_hash->{$_}) and ($arg_hash->{$_} = '') foreach (keys %$arg_hash);
+    defined($arg_hash->{$_}) or delete($arg_hash->{$_}) foreach (keys %$arg_hash);
 
     #Handle CA paths properly if no CA file is specified
     if ($arg_hash->{'SSL_ca_path'} ne '' and !(-f $arg_hash->{'SSL_ca_file'})) {

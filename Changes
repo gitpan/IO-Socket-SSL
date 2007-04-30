@@ -1,8 +1,11 @@
+v1.06
+        - instead of setting undef args to '' in configure_SSL drop
+          them. This makes Net::SMTP::SSL working again because it
+          does not give LocalPort of '' to IO::Socket::INET any more
 v1.05
         - make session cache working even if the IO::Socket::SSL object
           was not created with IO::Socket::SSL->new but with
           IO::Socket::SSL->start_SSL on an established socket
-
 v1.04
         - added way to create SSL object with predefined session
 	  cache, thus making it possible to share the cache between
