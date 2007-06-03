@@ -91,12 +91,12 @@ if ( $pid == 0 ) {
 	while (1) {
 	    $to_server->connect( $server_addr ) && last;
 	    if ( $! == EINPROGRESS ) {
-		#DEBUG( 'connect in progress' );
+		diag( 'connect in progress' );
 		IO::Select->new( $to_server )->can_read(30) && next;
 		print "not ";
 		last;
 	    }
-	    #DEBUG( 'connect failed: '.$! );
+	    diag( 'connect failed: '.$! );
 	    print "not ";
 	    last;
 	}
@@ -117,10 +117,10 @@ if ( $pid == 0 ) {
 	    SSL_cipher_list => 'HIGH',
 	    %extra_options
 	)) {
-	    #DEBUG( 'start_SSL return undef' );
+	    diag( 'start_SSL return undef' );
 	    print "not ";
 	} elsif ( !UNIVERSAL::isa( $to_server,'IO::Socket::SSL' ) ) {
-	    #DEBUG( 'failed to upgrade socket' );
+	    diag( 'failed to upgrade socket' );
 	    print "not ";
 	}
 	ok( "upgrade client to IO::Socket::SSL" );
@@ -131,14 +131,14 @@ if ( $pid == 0 ) {
 	my $attempts = 0;
 	while ( 1 ) {
 	    $to_server->connect_SSL && last;
-	    #DEBUG( $SSL_ERROR );
+	    diag( $SSL_ERROR );
 	    if ( $SSL_ERROR == SSL_WANT_READ ) {
 		$attempts++;
 		IO::Select->new($to_server)->can_read(30) && next; # retry if can read
 	    } elsif ( $SSL_ERROR == SSL_WANT_WRITE ) {
 		IO::Select->new($to_server)->can_write(30) && next; # retry if can write
 	    }
-	    #DEBUG( "failed to connect: ".$to_server->errstr );
+	    diag( "failed to connect: ".$to_server->errstr );
 	    print "not ";
 	    last;
 	}
@@ -159,25 +159,38 @@ if ( $pid == 0 ) {
 	my $msg = "1234567890";
 	$attempts = 0;
 	my $bytes_send = 0;
+
+	# set send buffer to 8192 so it will definitly fail writing all 100000 bytes in it
+	# linux allocates twice as much (see tcp(7)) but it's small enough anyway
+	eval q{ 
+	    setsockopt( $to_server, SOL_SOCKET, SO_SNDBUF, pack( "I",8192 ));
+	    diag( "sndbuf=".unpack( "I",getsockopt( $to_server, SOL_SOCKET, SO_SNDBUF )));
+	};
+	my $test_might_fail;
+	if ( $@ ) {
+	    # the next test might fail because setsockopt(... SO_SNDBUF...) failed
+	    $test_might_fail = 1;
+	}
+
 	WRITE:
 	for( my $i=0;$i<10000;$i++ ) {
 	    my $offset = 0;
 	    while (1) {
 		my $n = syswrite( $to_server,$msg,length($msg)-$offset,$offset );
 		if ( !defined($n) ) {
-		    #DEBUG( "\$!=$! \$SSL_ERROR=$SSL_ERROR send=$bytes_send" );
+		    diag( "\$!=$! \$SSL_ERROR=$SSL_ERROR send=$bytes_send" );
 		    if ( $! == EAGAIN ) {
 			if ( $SSL_ERROR == SSL_WANT_WRITE ) {
-			    #DEBUG( 'wait for write' );
+			    diag( 'wait for write' );
 			    $attempts++;
 			    IO::Select->new($to_server)->can_write(30);
-			    #DEBUG( "can write again" );
+			    diag( "can write again" );
 			} elsif ( $SSL_ERROR == SSL_WANT_READ ) {
-			    #DEBUG( 'wait for read' );
+			    diag( 'wait for read' );
 			    IO::Select->new($to_server)->can_read(30);
 			}
 		    } elsif ( ( $! == EPIPE || $! == ECONNRESET ) && $bytes_send > 30000 ) {
-			#DEBUG( "connection closed hard" );
+			diag( "connection closed hard" );
 			last WRITE;
 		    } else {
 			print "not ";
@@ -185,10 +198,10 @@ if ( $pid == 0 ) {
 		    }
 		    next;
 		} elsif ( $n == 0 ) {
-		    #DEBUG( "connection closed" );
+		    diag( "connection closed" );
 		    last WRITE;
 		} elsif ( $n<0 ) {
-		    #DEBUG( "syswrite returned $n!" );
+		    diag( "syswrite returned $n!" );
 		    print "not ";
 		    last WRITE;
 		}
@@ -198,14 +211,21 @@ if ( $pid == 0 ) {
 		    last
 		} else {
 		    $offset += $n;
-		    #DEBUG( "partial write of $n new offset=$offset" );
+		    diag( "partial write of $n new offset=$offset" );
 		}
 	    }
 	}
 	ok( "syswrite" );
 	
-	print "not " if !$attempts;
-	ok( "multiple write attempts" );
+	if ( ! $attempts ) {
+	    if ( $test_might_fail ) {
+	    	ok( " write attempts failed, but OK nevertheless because setsockopt failed" );
+	    } else {
+	    	print "not " if !$attempts;
+	    }
+	} else {
+	    ok( "multiple write attempts" );
+	}
 
 	print "not " if $bytes_send < 30000;
 	ok( "30000 bytes send" );
@@ -229,7 +249,7 @@ if ( $pid == 0 ) {
 	my $from_client = $server->accept or print "not ";
 	ok( "tcp accept" );
 	$from_client || do {
-	    #DEBUG( "failed to accept: $!" );
+	    diag( "failed to accept: $!" );
 	    next;
 	};
 
@@ -259,10 +279,10 @@ if ( $pid == 0 ) {
 	    SSL_cipher_list => 'HIGH',
 	    %extra_options
 	)) {
-	    #DEBUG( 'start_SSL return undef' );
+	    diag( 'start_SSL return undef' );
 	    print "not ";
 	} elsif ( !UNIVERSAL::isa( $from_client,'IO::Socket::SSL' ) ) {
-	    #DEBUG( 'failed to upgrade socket' );
+	    diag( 'failed to upgrade socket' );
 	    print "not ";
 	}
 	ok( "upgrade to_client to IO::Socket::SSL" );
@@ -275,7 +295,7 @@ if ( $pid == 0 ) {
 	my $attempts = 0;
 	while ( 1 ) {
 	    $from_client->accept_SSL && last;
-	    #DEBUG( $SSL_ERROR );
+	    diag( $SSL_ERROR );
 	    if ( $SSL_ERROR == SSL_WANT_READ ) {
 		$attempts++;
 		IO::Select->new($from_client)->can_read(30) && next; # retry if can read
@@ -283,7 +303,7 @@ if ( $pid == 0 ) {
 		$attempts++;
 		IO::Select->new($from_client)->can_write(30) && next; # retry if can write
 	    }
-	    #DEBUG( "failed to accept: ".$from_client->errstr );
+	    diag( "failed to accept: ".$from_client->errstr );
 	    print "not ";
 	    last;
 	}
@@ -300,7 +320,7 @@ if ( $pid == 0 ) {
 	
 	IO::Select->new( $from_client )->can_read(30);
 	( sysread( $from_client, $buf,10 ) == 10 ) || print "not ";
-	#DEBUG($buf);
+	diag($buf);
 	ok( "received client message" );
 
 	sleep(5);
@@ -311,7 +331,7 @@ if ( $pid == 0 ) {
 	while ( ( my $diff = 30000 - $bytes_received ) > 0 ) {
 	    my $n = sysread( $from_client,my $buf,$diff );
 	    if ( !defined($n) ) {
-		#DEBUG( "\$!=$! \$SSL_ERROR=$SSL_ERROR" );
+		diag( "\$!=$! \$SSL_ERROR=$SSL_ERROR" );
 		if ( $! == EAGAIN ) {
 		    if ( $SSL_ERROR == SSL_WANT_READ ) {
 			$attempts++;
@@ -326,19 +346,19 @@ if ( $pid == 0 ) {
 		}
 		next;
 	    } elsif ( $n == 0 ) {
-		#DEBUG( "connection closed" );
+		diag( "connection closed" );
 		last READ;
 	    } elsif ( $n<0 ) {
-		#DEBUG( "sysread returned $n!" );
+		diag( "sysread returned $n!" );
 		print "not ";
 		last READ;
 	    }
 
 	    $bytes_received += $n;
-	    #DEBUG( "read of $n bytes" );
+	    diag( "read of $n bytes" );
 	}
 
-	#DEBUG( "read $bytes_received" );
+	diag( "read $bytes_received" );
 	close($from_client);
     }
 
@@ -351,3 +371,4 @@ exit;
 
 
 sub ok { print "ok # [$ID] @_\n"; }
+sub diag { print "# @_\n" }
