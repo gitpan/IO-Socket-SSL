@@ -1,3 +1,7 @@
+v1.07
+        - fix t/nonblock.t on systems which have by default a larger
+          socket buffer. Set SO_SNDBUF explicitly with setsockopt
+          to force smaller writes on the socket
 v1.06
         - instead of setting undef args to '' in configure_SSL drop
           them. This makes Net::SMTP::SSL working again because it
