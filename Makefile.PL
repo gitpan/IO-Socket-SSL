@@ -50,11 +50,20 @@ $| = 1;
     }
 }
 
+{
+    # make sure that we have dualvar from the XS Version of Scalar::Util
+    if ( eval { require Scalar::Util } ) {
+	eval { Scalar::Util::dualvar( 0,'' ) };
+    	die "You need the XS Version of Scalar::Util for dualvar() support" 
+	    if $@
+    }
+}
+
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
 WriteMakefile(
   'NAME'	=> 'IO::Socket::SSL',
-  'AUTHOR'      => 'Peter Behroozi & Marko Asplund',
+  'AUTHOR'      => 'Steffen Ullrich & Peter Behroozi & Marko Asplund',
   'ABSTRACT'    => 'Nearly transparent SSL encapsulation for IO::Socket::INET.',
   'VERSION_FROM' => 'SSL.pm',
   'DISTNAME' => 'IO-Socket-SSL',

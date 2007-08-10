@@ -1,3 +1,7 @@
+v1.08
+	- make sure that Scalar::Util has support for dualvar
+          (Makefile.PL,SSL.pm) because the perl-only version has
+          has no dualvar
 v1.07
         - fix t/nonblock.t on systems which have by default a larger
           socket buffer. Set SO_SNDBUF explicitly with setsockopt

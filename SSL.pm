@@ -17,10 +17,17 @@ package IO::Socket::SSL;
 use IO::Socket;
 use Net::SSLeay 1.21;
 use Exporter ();
-use Scalar::Util 'dualvar';
 use Errno 'EAGAIN';
 use Carp;
 use strict;
+
+# non-XS Versions of Scalar::Util will fail
+BEGIN{
+	eval { use Scalar::Util 'dualvar'; dualvar(0,'') };
+	die "You need the XS Version of Scalar::Util for dualvar() support" 
+		if $@;
+}
+
 
 use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 
@@ -41,7 +48,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.07';
+    $VERSION = '1.08';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
