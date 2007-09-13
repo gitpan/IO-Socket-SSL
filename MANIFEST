@@ -30,5 +30,6 @@ t/sysread_write.t
 t/cert_no_file.t
 t/dhe.t
 t/readline.t
+t/start-stopssl.t
 util/export_certs.pl
 META.yml

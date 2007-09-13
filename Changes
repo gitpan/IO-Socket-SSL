@@ -1,3 +1,10 @@
+v1.09
+        - new method stop_SSL as opposite of start_SSL based on a idea
+          of Bron Gondwana <brong[AT]fastmail[DOT]fm>
+          To support this method the SSL_shutdown handling had to be
+          fixed, e.g. in close a proper unidirectional shutdown
+          should be done while in stop_SSL a bidirectional shutdown
+        - try to make it clearer that thread support is buggy
 v1.08
 	- make sure that Scalar::Util has support for dualvar
           (Makefile.PL,SSL.pm) because the perl-only version has

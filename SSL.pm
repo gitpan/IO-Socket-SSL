@@ -21,11 +21,15 @@ use Errno 'EAGAIN';
 use Carp;
 use strict;
 
+# from openssl/ssl.h, should be better in Net::SSLeay
+use constant SSL_SENT_SHUTDOWN => 1;
+use constant SSL_RECEIVED_SHUTDOWN => 2;
+
 # non-XS Versions of Scalar::Util will fail
 BEGIN{
-	eval { use Scalar::Util 'dualvar'; dualvar(0,'') };
-	die "You need the XS Version of Scalar::Util for dualvar() support" 
-		if $@;
+    eval { use Scalar::Util 'dualvar'; dualvar(0,'') };
+    die "You need the XS Version of Scalar::Util for dualvar() support" 
+	if $@;
 }
 
 
@@ -48,7 +52,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.08';
+    $VERSION = '1.09';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -544,32 +548,93 @@ sub readline {
 sub close {
     my $self = shift || return _invalid_object();
     my $close_args = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
+
+    return if ! $self->stop_SSL(
+	SSL_fast_shutdown => 1,
+	%$close_args,
+	_SSL_ioclass_downgrade => 0,
+    );
+
+    if ( ! $close_args->{_SSL_in_DESTROY} ) {
+	untie( *$self );
+    	return $self->SUPER::close;
+    }
+    return 1;
+}
+
+sub stop_SSL {
+    my $self = shift || return _invalid_object();
+    my $stop_args = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
     return $self->error("SSL object already closed") unless (${*$self}{'_SSL_opened'});
 
     if (my $ssl = ${*$self}{'_SSL_object'}) {
-	local $SIG{PIPE} = sub{};
-	$close_args->{'SSL_no_shutdown'} or Net::SSLeay::shutdown($ssl);
+	my $shutdown_done;
+	if ( $stop_args->{SSL_no_shutdown} ) {
+	    $shutdown_done = 1;
+	} else {
+	    my $fast = $stop_args->{SSL_fast_shutdown};
+	    my $status = Net::SSLeay::get_shutdown($ssl);
+	    if ( $status == SSL_RECEIVED_SHUTDOWN 
+	    	|| ( $status != 0 && $fast )) {
+	    	# shutdown done
+	    	$shutdown_done = 1;
+	    } else {
+		# need to initiate/continue shutdown
+	    	local $SIG{PIPE} = sub{};
+		for my $try (1,2 ) {
+		    my $rv = Net::SSLeay::shutdown($ssl);
+		    if ( $rv < 0 ) {
+			# non-blocking socket?
+			$self->_set_rw_error( $ssl,$rv );
+			# need to try again
+			return;
+		    } elsif ( $rv
+			|| ( $rv == 0 && $fast )) {
+			# shutdown finished
+	    		$shutdown_done = 1;
+			last;
+		    } else {
+			# shutdown partly finished (e.g. one direction)
+			# call again
+		    }
+		}
+	    }
+	}
+
+	return if ! $shutdown_done;
 	Net::SSLeay::free($ssl);
-	delete ${*$self}{'_SSL_object'};
+	delete ${*$self}{_SSL_object};
     }
 
-    if ($close_args->{'SSL_ctx_free'}) {
-	my $ctx = ${*$self}{'_SSL_ctx'};
-	delete ${*$self}{'_SSL_ctx'};
-	$ctx->DESTROY();
+    if ($stop_args->{'SSL_ctx_free'}) {
+	my $ctx = delete ${*$self}{'_SSL_ctx'};
+	$ctx && $ctx->DESTROY();
     }
 
-    if (${*$self}{'_SSL_certificate'}) {
-	Net::SSLeay::X509_free(${*$self}{'_SSL_certificate'});
+    if (my $cert = delete ${*$self}{'_SSL_certificate'}) {
+	Net::SSLeay::X509_free($cert);
     }
 
     ${*$self}{'_SSL_opened'} = 0;
-    my $arg_hash = ${*$self}{'_SSL_arguments'};
-    untie(*$self) unless ($arg_hash->{'SSL_server'}
-			  or $close_args->{_SSL_in_DESTROY});
 
-    $self->SUPER::close unless ($close_args->{_SSL_in_DESTROY});
+    if ( ! $stop_args->{_SSL_in_DESTROY} ) {
+
+	my $downgrade = $stop_args->{_SSL_ioclass_downgrade};
+	if ( $downgrade || ! defined $downgrade ) {
+	    # rebless to original class from start_SSL
+	    if ( my $orig_class = delete ${*$self}{'_SSL_ioclass_upgraded'} ) {
+		bless $self,$orig_class;
+		untie(*$self);
+		# FIXME: if original class was tied too we need to restore the tie
+	    }
+	    # remove all _SSL related from *$self
+	    my @sslkeys = grep { m{^_?SSL_} } keys %{*$self};
+	    delete @{*$self}{@sslkeys} if @sslkeys;
+	}
+    }
+    return 1;
 }
+
 
 sub kill_socket {
     my $self = shift;
@@ -619,6 +684,7 @@ sub start_SSL {
     $socket->configure_SSL($arg_hash) or bless($socket, $original_class) && return;
 
     ${*$socket}{'_SSL_fileno'} = $original_fileno;
+    ${*$socket}{'_SSL_ioclass_upgraded'} = $original_class;
 
     my $start_handshake = $arg_hash->{SSL_startHandshake};
     if ( ! defined($start_handshake) || $start_handshake ) {
@@ -1083,6 +1149,8 @@ see the note about return values).
 If you are using non-blocking sockets read on, as version 0.98 added better
 support for non-blocking.
 
+If you are trying to use it with threads see the BUGS section.
+
 =head1 METHODS
 
 IO::Socket::SSL inherits its methods from IO::Socket::INET, overriding them
@@ -1275,6 +1343,13 @@ If set to a true value, this option will make close() not use the SSL_shutdown()
 on the socket in question so that the close operation can complete without problems
 if you have used shutdown() or are working on a copy of a socket.
 
+=item SSL_fast_shutdown
+
+If set to true only a unidirectional shutdown will be done, e.g. only the 
+close_notify (see SSL_shutdown(3)) will be called. Otherwise a bidrectional
+shutdown will be done. If used within close() it defaults to true, if used
+within stop_SSL() it defaults to false.
+
 =item SSL_ctx_free
 
 If you want to make sure that the SSL context of the socket is destroyed when
@@ -1340,6 +1415,17 @@ original class.  For non-blocking sockets you better just upgrade the socket to
 IO::Socket::SSL and call accept_SSL or connect_SSL and the upgraded object. To
 just upgrade the socket set B<SSL_startHandshake> explicitly to 0. If you call start_SSL
 w/o this parameter it will revert to blocking behavior for accept_SSL and connect_SSL.
+
+=item B<stop_SSL(...)>
+
+This is the opposite of start_SSL(), e.g. it will shutdown the SSL connection
+and return to the class before start_SSL(). It gets the same arguments as close(),
+in fact close() calls stop_SSL() (but without downgrading the class).
+
+Will return true if it suceeded and undef if failed. This might be the case for
+non-blocking sockets. In this case $! is set to EAGAIN and the ssl error to
+SSL_WANT_READ or SSL_WANT_WRITE. In this case the call should be retried again with 
+the same arguments once the socket is ready is until it succeeds.
 
 =item B<< IO::Socket::SSL->new_from_fd($fd, ...) >>
 
@@ -1466,6 +1552,8 @@ IO::Socket::SSL is not threadsafe.
 This is because IO::Socket::SSL is based on Net::SSLeay which 
 uses a global object to access some of the API of openssl
 and is therefore not threadsafe.
+It might probably work if you don't use SSL_verify_cb and
+SSL_password_cb.
 
 IO::Socket::SSL does not work together with Storable::fd_retrieve/fd_store.
 See BUGS file for more information and how to work around the problem.
