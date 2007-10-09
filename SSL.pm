@@ -17,7 +17,7 @@ package IO::Socket::SSL;
 use IO::Socket;
 use Net::SSLeay 1.21;
 use Exporter ();
-use Errno 'EAGAIN';
+use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
@@ -52,7 +52,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.09';
+    $VERSION = '1.10';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -200,6 +200,7 @@ sub connect {
 
 sub connect_SSL {
     my $self = shift;
+    my $args = @_>1 ? {@_}: $_[0]||{};
 
     my ($ssl,$ctx);
     if ( ! ${*$self}{'_SSL_opening'} ) {
@@ -231,29 +232,75 @@ sub connect_SSL {
     $ssl ||= ${*$self}{'_SSL_object'};
 
     $SSL_ERROR = undef;
-    #DEBUG( 'calling ssleay::connect' );
-    my $rv = Net::SSLeay::connect($ssl);
-    #DEBUG( "rv=$rv" );
-    if ( $rv < 0 ) {
-	unless ( $self->_set_rw_error( $ssl,$rv )) {
-	    $self->error("SSL connect attempt failed with unknown error");
+    my $timeout = exists $args->{Timeout} 
+    	? $args->{Timeout} 
+	: ${*$self}{io_socket_timeout}; # from IO::Socket
+    if ( defined($timeout) && $timeout>=0 && $self->blocking(0) ) {
+	# timeout was given and socket was blocking
+    	# enforce timeout with now non-blocking socket
+    } else {
+	# timeout does not apply because invalid or socket non-blocking
+    	$timeout = undef; 
+    }
+
+    my $start = defined($timeout) && time();
+    for my $dummy (1) {
+	#DEBUG( 'calling ssleay::connect' );
+	my $rv = Net::SSLeay::connect($ssl);
+	#DEBUG( "rv=$rv" );
+	if ( $rv < 0 ) {
+	    unless ( $self->_set_rw_error( $ssl,$rv )) {
+		$self->error("SSL connect attempt failed with unknown error");
+		delete ${*$self}{'_SSL_opening'};
+		${*$self}{'_SSL_opened'} = 1;
+		return $self->fatal_ssl_error();
+	    }
+
+	    #DEBUG( 'ssl handshake in progress' );
+	    # connect failed because handshake needs to be completed
+	    # if socket was non-blocking or no timeout was given return with this error
+	    return if ! defined($timeout);
+
+	    # wait until socket is readable or writable
+	    my $rv;
+	    if ( $timeout>0 ) {
+		my $vec = '';
+		vec($vec,$self->fileno,1) = 1;
+	    	$rv = 
+		    $SSL_ERROR == SSL_WANT_READ ? select( $vec,undef,undef,$timeout) :
+		    $SSL_ERROR == SSL_WANT_WRITE ? select( undef,$vec,undef,$timeout) :
+		    undef;
+	    } else {
+	    	$! = ETIMEDOUT
+	    }
+	    if ( ! $rv ) {
+		# failed because of timeout, return
+	    	$! ||= ETIMEDOUT;
+		delete ${*$self}{'_SSL_opening'};
+		${*$self}{'_SSL_opened'} = 1;
+		$self->blocking(1); # was blocking before
+	    	return 
+	    }
+
+	    # socket is ready, try non-blocking connect again after recomputing timeout
+	    my $now = time();
+	    $timeout -= $now - $start;
+	    $start = $now;
+	    redo;
+
+	} elsif ( $rv == 0 ) {
 	    delete ${*$self}{'_SSL_opening'};
+	    $self->error("SSL connect attempt failed because of handshake problems" );
 	    ${*$self}{'_SSL_opened'} = 1;
 	    return $self->fatal_ssl_error();
 	}
-	#DEBUG( 'ssl handshake in progress' );
-	return;
-    } elsif ( $rv == 0 ) {
-	delete ${*$self}{'_SSL_opening'};
-	$self->error("SSL connect attempt failed because of handshake problems" );
-	${*$self}{'_SSL_opened'} = 1;
-	return $self->fatal_ssl_error();
     }
 
     #DEBUG( 'ssl handshake done' );
     # ssl connect successful
     delete ${*$self}{'_SSL_opening'};
     ${*$self}{'_SSL_opened'}=1;
+    $self->blocking(1) if defined($timeout); # was blocking before
 
     $ctx ||= ${*$self}{'_SSL_ctx'};
     if ( $ctx->has_session_cache ) {
@@ -303,8 +350,9 @@ sub accept {
 }
 
 sub accept_SSL {
-    my ($self,$socket) = @_;
-    $socket ||= $self;
+    my $self = shift;
+    my $socket = ( @_ && UNIVERSAL::isa( $_[0], 'IO::Handle' )) ? shift : $self;
+    my $args = @_>1 ? {@_}: $_[0]||{};
 
     my $ssl;
     if ( ! ${*$self}{'_SSL_opening'} ) {
@@ -333,27 +381,74 @@ sub accept_SSL {
 
     $SSL_ERROR = undef;
     #DEBUG( 'calling ssleay::accept' );
-    my $rv = Net::SSLeay::accept($ssl);
-    #DEBUG( 'called ssleay::accept rv='.$rv );
-    if ( $rv < 0 ) {
-	unless ( $socket->_set_rw_error( $ssl,$rv )) {
-	    $socket->error("SSL accept attempt failed with unknown error");
+
+    my $timeout = exists $args->{Timeout} 
+    	? $args->{Timeout} 
+	: ${*$self}{io_socket_timeout}; # from IO::Socket
+    if ( defined($timeout) && $timeout>=0 && $self->blocking(0) ) {
+	# timeout was given and socket was blocking
+    	# enforce timeout with now non-blocking socket
+    } else {
+	# timeout does not apply because invalid or socket non-blocking
+    	$timeout = undef; 
+    }
+
+    my $start = defined($timeout) && time();
+    for my $dummy (1) {
+	my $rv = Net::SSLeay::accept($ssl);
+	#DEBUG( 'called ssleay::accept rv='.$rv );
+	if ( $rv < 0 ) {
+	    unless ( $socket->_set_rw_error( $ssl,$rv )) {
+		$socket->error("SSL accept attempt failed with unknown error");
+		delete ${*$self}{'_SSL_opening'};
+		${*$socket}{'_SSL_opened'} = 1;
+		return $socket->fatal_ssl_error();
+	    }
+
+	    # accept failed because handshake needs to be completed
+	    # if socket was non-blocking or no timeout was given return with this error
+	    return if ! defined($timeout);
+
+	    # wait until socket is readable or writable
+	    my $rv;
+	    if ( $timeout>0 ) {
+		my $vec = '';
+		vec($vec,$self->fileno,1) = 1;
+	    	$rv = 
+		    $SSL_ERROR == SSL_WANT_READ ? select( $vec,undef,undef,$timeout) :
+		    $SSL_ERROR == SSL_WANT_WRITE ? select( undef,$vec,undef,$timeout) :
+		    undef;
+	    } else {
+	    	$! = ETIMEDOUT
+	    }
+	    if ( ! $rv ) {
+		# failed because of timeout, return
+	    	$! ||= ETIMEDOUT;
+		delete ${*$self}{'_SSL_opening'};
+		${*$socket}{'_SSL_opened'} = 1;
+		$self->blocking(1); # was blocking before
+	    	return 
+	    }
+
+	    # socket is ready, try non-blocking accept again after recomputing timeout
+	    my $now = time();
+	    $timeout -= $now - $start;
+	    $start = $now;
+	    redo;
+
+	} elsif ( $rv == 0 ) {
+	    $socket->error("SSL connect accept failed because of handshake problems" );
 	    delete ${*$self}{'_SSL_opening'};
-    	    ${*$socket}{'_SSL_opened'} = 1;
+	    ${*$socket}{'_SSL_opened'} = 1;
 	    return $socket->fatal_ssl_error();
 	}
-	return;
-    } elsif ( $rv == 0 ) {
-	$socket->error("SSL connect accept failed because of handshake problems" );
-	delete ${*$self}{'_SSL_opening'};
-	${*$socket}{'_SSL_opened'} = 1;
-	return $socket->fatal_ssl_error();
     }
 
     #DEBUG( 'handshake done, socket ready' );
     # socket opened
     delete ${*$self}{'_SSL_opening'};
     ${*$socket}{'_SSL_opened'} = 1;
+    $self->blocking(1) if defined($timeout); # was blocking before
 
     tie *{$socket}, "IO::Socket::SSL::SSL_HANDLE", $socket;
 
@@ -675,6 +770,7 @@ sub start_SSL {
     my ($class,$socket) = (shift,shift);
     return $class->error("Not a socket") unless(ref($socket));
     my $arg_hash = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
+    my %to = exists $arg_hash->{Timeout} ? ( Timeout => delete $arg_hash->{Timeout} ) :();
     my $original_class = ref($socket);
     my $original_fileno = (UNIVERSAL::can($socket, "fileno"))
 	? $socket->fileno : CORE::fileno($socket);
@@ -692,8 +788,8 @@ sub start_SSL {
 	#DEBUG( "start handshake" );
 	my $blocking = $socket->blocking(1);
 	my $result = ${*$socket}{'_SSL_arguments'}{SSL_server}
-	    ? $socket->accept_SSL
-	    : $socket->connect_SSL;
+	    ? $socket->accept_SSL(%to)
+	    : $socket->connect_SSL(%to);
 	$socket->blocking(0) if !$blocking;
     	return $result ? $socket : (bless($socket, $original_class) && ());
     } else {
@@ -1415,6 +1511,10 @@ original class.  For non-blocking sockets you better just upgrade the socket to
 IO::Socket::SSL and call accept_SSL or connect_SSL and the upgraded object. To
 just upgrade the socket set B<SSL_startHandshake> explicitly to 0. If you call start_SSL
 w/o this parameter it will revert to blocking behavior for accept_SSL and connect_SSL.
+
+If given the parameter "Timeout" it will stop if after the timeout no SSL connection
+was established. This parameter is only used for blocking sockets, if it is not given the
+default Timeout from the underlying IO::Socket will be used.
 
 =item B<stop_SSL(...)>
 

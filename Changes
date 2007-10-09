@@ -1,3 +1,8 @@
+v1.10
+	- start_SSL, accept_SSL and connect_SSL have argument for Timeout
+          so that the SSL handshake will not block forever. Only used if the
+          socket is blocking. If not set the Timeout value from the underlying
+          IO::Socket is used
 v1.09
         - new method stop_SSL as opposite of start_SSL based on a idea
           of Bron Gondwana <brong[AT]fastmail[DOT]fm>

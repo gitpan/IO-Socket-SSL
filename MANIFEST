@@ -31,5 +31,8 @@ t/cert_no_file.t
 t/dhe.t
 t/readline.t
 t/start-stopssl.t
+t/acceptSSL-timeout.t
+t/connectSSL-timeout.t
+t/testlib.pl
 util/export_certs.pl
 META.yml
