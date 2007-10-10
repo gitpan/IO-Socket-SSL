@@ -1,3 +1,6 @@
+v1.11
+	- fixed errors in accept_SSL which would work when called from start_SSL
+          but not from accept
 v1.10
 	- start_SSL, accept_SSL and connect_SSL have argument for Timeout
           so that the SSL handshake will not block forever. Only used if the

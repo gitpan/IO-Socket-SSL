@@ -52,7 +52,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.10';
+    $VERSION = '1.11';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -385,7 +385,7 @@ sub accept_SSL {
     my $timeout = exists $args->{Timeout} 
     	? $args->{Timeout} 
 	: ${*$self}{io_socket_timeout}; # from IO::Socket
-    if ( defined($timeout) && $timeout>=0 && $self->blocking(0) ) {
+    if ( defined($timeout) && $timeout>=0 && $socket->blocking(0) ) {
 	# timeout was given and socket was blocking
     	# enforce timeout with now non-blocking socket
     } else {
@@ -413,7 +413,7 @@ sub accept_SSL {
 	    my $rv;
 	    if ( $timeout>0 ) {
 		my $vec = '';
-		vec($vec,$self->fileno,1) = 1;
+		vec($vec,$socket->fileno,1) = 1;
 	    	$rv = 
 		    $SSL_ERROR == SSL_WANT_READ ? select( $vec,undef,undef,$timeout) :
 		    $SSL_ERROR == SSL_WANT_WRITE ? select( undef,$vec,undef,$timeout) :
@@ -426,7 +426,7 @@ sub accept_SSL {
 	    	$! ||= ETIMEDOUT;
 		delete ${*$self}{'_SSL_opening'};
 		${*$socket}{'_SSL_opened'} = 1;
-		$self->blocking(1); # was blocking before
+		$socket->blocking(1); # was blocking before
 	    	return 
 	    }
 
@@ -448,7 +448,7 @@ sub accept_SSL {
     # socket opened
     delete ${*$self}{'_SSL_opening'};
     ${*$socket}{'_SSL_opened'} = 1;
-    $self->blocking(1) if defined($timeout); # was blocking before
+    $socket->blocking(1) if defined($timeout); # was blocking before
 
     tie *{$socket}, "IO::Socket::SSL::SSL_HANDLE", $socket;
 
