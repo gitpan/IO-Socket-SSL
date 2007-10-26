@@ -52,7 +52,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.11';
+    $VERSION = '1.12';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -66,6 +66,14 @@ BEGIN {
     Net::SSLeay::SSLeay_add_ssl_algorithms();
     Net::SSLeay::randomize();
 
+}
+
+sub DEBUG {
+    $DEBUG or return;
+    my (undef,undef,$line) = caller;
+    my $msg = shift;
+    $msg = sprintf $msg,@_ if @_;
+    print STDERR "DEBUG: $line: $msg\n";
 }
 
 sub CLONE_SKIP { 1 }
@@ -235,7 +243,8 @@ sub connect_SSL {
     my $timeout = exists $args->{Timeout} 
     	? $args->{Timeout} 
 	: ${*$self}{io_socket_timeout}; # from IO::Socket
-    if ( defined($timeout) && $timeout>=0 && $self->blocking(0) ) {
+    if ( defined($timeout) && $timeout>0 && $self->blocking(0) ) {
+	#DEBUG( "set socket to non-blocking to enforce timeout=$timeout" );
 	# timeout was given and socket was blocking
     	# enforce timeout with now non-blocking socket
     } else {
@@ -247,12 +256,13 @@ sub connect_SSL {
     for my $dummy (1) {
 	#DEBUG( 'calling ssleay::connect' );
 	my $rv = Net::SSLeay::connect($ssl);
-	#DEBUG( "rv=$rv" );
+	#DEBUG( "connect -> rv=$rv" );
 	if ( $rv < 0 ) {
 	    unless ( $self->_set_rw_error( $ssl,$rv )) {
 		$self->error("SSL connect attempt failed with unknown error");
 		delete ${*$self}{'_SSL_opening'};
 		${*$self}{'_SSL_opened'} = 1;
+		#DEBUG( "fatal SSL error: $SSL_ERROR" );
 		return $self->fatal_ssl_error();
 	    }
 
@@ -266,14 +276,17 @@ sub connect_SSL {
 	    if ( $timeout>0 ) {
 		my $vec = '';
 		vec($vec,$self->fileno,1) = 1;
+		#DEBUG( "waiting for fd to become ready: $SSL_ERROR" );
 	    	$rv = 
 		    $SSL_ERROR == SSL_WANT_READ ? select( $vec,undef,undef,$timeout) :
 		    $SSL_ERROR == SSL_WANT_WRITE ? select( undef,$vec,undef,$timeout) :
 		    undef;
 	    } else {
+		#DEBUG( "handshake failed because no more time" );
 	    	$! = ETIMEDOUT
 	    }
 	    if ( ! $rv ) {
+		#DEBUG( "handshake failed because socket did not became ready" );
 		# failed because of timeout, return
 	    	$! ||= ETIMEDOUT;
 		delete ${*$self}{'_SSL_opening'};
@@ -283,6 +296,7 @@ sub connect_SSL {
 	    }
 
 	    # socket is ready, try non-blocking connect again after recomputing timeout
+	    #DEBUG( "socket ready, retrying connect" );
 	    my $now = time();
 	    $timeout -= $now - $start;
 	    $start = $now;
@@ -290,6 +304,7 @@ sub connect_SSL {
 
 	} elsif ( $rv == 0 ) {
 	    delete ${*$self}{'_SSL_opening'};
+	    #DEBUG( "connection failed - connect returned 0" );
 	    $self->error("SSL connect attempt failed because of handshake problems" );
 	    ${*$self}{'_SSL_opened'} = 1;
 	    return $self->fatal_ssl_error();
@@ -385,7 +400,7 @@ sub accept_SSL {
     my $timeout = exists $args->{Timeout} 
     	? $args->{Timeout} 
 	: ${*$self}{io_socket_timeout}; # from IO::Socket
-    if ( defined($timeout) && $timeout>=0 && $socket->blocking(0) ) {
+    if ( defined($timeout) && $timeout>0 && $socket->blocking(0) ) {
 	# timeout was given and socket was blocking
     	# enforce timeout with now non-blocking socket
     } else {
@@ -853,6 +868,7 @@ sub errstr {
 sub fatal_ssl_error {
     my $self = shift;
     my $error_trap = ${*$self}{'_SSL_arguments'}->{'SSL_error_trap'};
+    $@ = $self->errstr;
     if (defined $error_trap and ref($error_trap) eq 'CODE') {
 	$error_trap->($self, $self->errstr()."\n".$self->get_ssleay_error());
     } else { $self->kill_socket; }
