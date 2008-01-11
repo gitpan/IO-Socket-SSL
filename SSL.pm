@@ -52,7 +52,7 @@ use vars qw(@ISA $VERSION $DEBUG $SSL_ERROR $GLOBAL_CONTEXT_ARGS @EXPORT );
 BEGIN {
     # Declare @ISA, $VERSION, $GLOBAL_CONTEXT_ARGS
     @ISA = qw(IO::Socket::INET);
-    $VERSION = '1.12';
+    $VERSION = '1.12_1';
     $GLOBAL_CONTEXT_ARGS = {};
 
     #Make $DEBUG another name for $Net::SSLeay::trace
@@ -70,13 +70,12 @@ BEGIN {
 
 sub DEBUG {
     $DEBUG or return;
-    my (undef,undef,$line) = caller;
+    my (undef,$file,$line) = caller;
     my $msg = shift;
     $msg = sprintf $msg,@_ if @_;
-    print STDERR "DEBUG: $line: $msg\n";
+    print STDERR "DEBUG: $file:$line: $msg\n";
 }
 
-sub CLONE_SKIP { 1 }
 
 # Export some stuff
 # inet4|inet6|debug will be handeled by myself, everything
@@ -965,7 +964,6 @@ BEGIN {
     $HAVE_WEAKREF = $@ ? 0 : 1;
 }
 
-sub CLONE_SKIP { 1 }
 
 sub TIEHANDLE {
     my ($class, $handle) = @_;
@@ -996,17 +994,20 @@ sub CLOSE {                          #<---- Do not change this function!
 package IO::Socket::SSL::SSL_Context;
 use strict;
 
+my %CTX_CREATED_IN_THIS_THREAD;
+*DEBUG = *IO::Socket::SSL::DEBUG;
+
 # should be better taken from Net::SSLeay, but they are not (yet) defined there
 use constant SSL_MODE_ENABLE_PARTIAL_WRITE => 1;
 use constant SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER => 2;
 
-sub CLONE_SKIP { 1 }
 
 # Note that the final object will actually be a reference to the scalar
 # (C-style pointer) returned by Net::SSLeay::CTX_*_new() so that
 # it can be blessed.
 sub new {
     my $class = shift;
+    DEBUG( "$class @_" );
     my $arg_hash = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
 
     my $ctx_object = $arg_hash->{'SSL_reuse_ctx'};
@@ -1124,6 +1125,9 @@ sub new {
     Net::SSLeay::CTX_set_verify($ctx, $verify_mode, $verify_callback);
 
     $ctx_object = { context => $ctx };
+    DEBUG( "new ctx $ctx" );
+    $CTX_CREATED_IN_THIS_THREAD{$ctx} = 1;
+
     if ( my $cache = $arg_hash->{SSL_session_cache} ) {
 	# use predefined cache
     	$ctx_object->{session_cache} = $cache
@@ -1152,17 +1156,22 @@ sub has_session_cache {
 }
 
 
+sub CLONE { %CTX_CREATED_IN_THIS_THREAD = (); DEBUG( "clone!" ) }
 sub DESTROY {
     my $self = shift;
-    $self->{context} and Net::SSLeay::CTX_free($self->{context});
+    if ( my $ctx = $self->{context} ) {
+	DEBUG( "free ctx $ctx open=".join( " ",keys %CTX_CREATED_IN_THIS_THREAD ));
+	if ( %CTX_CREATED_IN_THIS_THREAD and 
+	    delete $CTX_CREATED_IN_THIS_THREAD{$ctx} ) {
+	    DEBUG( "OK free ctx $ctx" );
+	    Net::SSLeay::CTX_free($ctx);
+	}
+    }
     delete(@{$self}{'context','session_cache'});
 }
 
-
 package IO::Socket::SSL::Session_Cache;
 use strict;
-
-sub CLONE_SKIP { 1 }
 
 sub new {
     my ($class, $size) = @_;

@@ -29,6 +29,7 @@ $| = 1;
 	print "Net::SSLeay could not find a random number generator on\n";
 	print "your system.  This will likely cause most of the tests\n";
 	print "to fail.  Please see the README file for more information.\n";
+	print "the message from Net::SSLeay was: $warning\n";
 
 	# Taken from ExtUtils::MakeMaker 6.16 (Michael Schwern) so that 
 	# the prompt() function can be emulated for older versions of ExtUtils::MakeMaker.
