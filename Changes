@@ -1,8 +1,11 @@
-v1.12_1
+v1.13
         - removed CLONE_SKIP which was added in 1.03 because this breaks
           windows forking. Handled threads/windows forking better by making
           sure that CTX from Net::SSLeay gets not freed multiple times from 
           different threads after cloning/forking
+        - removed setting LocalPort to 0 in tests, instead leave it undef
+          if a random port should be allocated. This should fix build problems 
+          with 5.6.1. Thanks to <andrew[DOT]benham[AT]thus[DOT]net>
 v1.12
 	- treat timeouts of 0 for accept_SSL and connect_SSL like no timeout,
           like IO::Socket does.

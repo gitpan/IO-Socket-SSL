@@ -29,7 +29,6 @@ print "1..9\n";
 
 my $ID = 'server';
 my %server_args = (
-    LocalPort => 0, # take random port
     LocalAddr => $SSL_SERVER_ADDR,
     Listen => 2,
     ReuseAddr => 1,

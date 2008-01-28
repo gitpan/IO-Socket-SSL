@@ -175,10 +175,9 @@ sub fd_grep_ok {
 sub create_listen_socket {
 	my ($addr,$port,$proto) = @_;
 	$addr ||= '127.0.0.1';
-	$port ||= 0;
 	my $sock = IO::Socket::INET->new(
 		LocalAddr => $addr,
-		LocalPort => $port,
+		$port ? ( LocalPort => $port ) : (),
 		Listen => 10,
 		Reuse => 1
 	) || die $!;
