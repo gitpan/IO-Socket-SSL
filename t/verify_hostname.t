@@ -25,7 +25,7 @@ my $can_idn  = eval { require Encode } &&
 	( eval { require Net::LibIDN } || eval { require Net::IDN::Encode } );
 
 $|=1;
-my $max = 37;
+my $max = 40;
 $max+=3 if $can_idn;
 print "1..$max\n";
 
@@ -88,6 +88,7 @@ if ( $pid == 0 ) {
 		'www-13.lala.other.local' => [],
 		'smtp.mydomain.local' => [qw(smtp ldap www)],
 		'xn--lwe-sna.idntest.local' => [qw(smtp ldap www)],
+		'smtp.mydomain.localizing.useless.local' => [],
 	);
 	if ( $can_idn ) {
 		# check IDN handling
