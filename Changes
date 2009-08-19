@@ -1,7 +1,9 @@
 
+v1.29 2009.08.19
+- fixed thanks for version 1.28
 v1.28 2009.08.19
 - fix memleak when SSL handshake failed.
-  Thanks john[AT]humyo[DOT]com for reporting
+  Thanks richardhundtu[AT]gmail[DOT]com
 
 v1.27 2009.07.24
 - changed possible local/utf-8 depended \w in some regex against more
