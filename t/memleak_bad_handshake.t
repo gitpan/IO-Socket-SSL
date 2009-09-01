@@ -63,8 +63,8 @@ exit;
 
 sub getsize {
 	my $pid = shift;
-	open( my $ps,'-|','ps','-o','vsize','-p',$pid ) or return;
-	<$ps>; # header
+	open( my $ps,'-|',"ps -o vsize -p $pid 2>/dev/null" ) or return;
+	<$ps> or return; # header
 	return int(<$ps>); # size
 }
 
