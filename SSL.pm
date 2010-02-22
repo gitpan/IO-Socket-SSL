@@ -78,7 +78,7 @@ BEGIN {
 	}) {
 		@ISA = qw(IO::Socket::INET);
 	}
-	$VERSION = '1.31';
+	$VERSION = '1.32';
 	$GLOBAL_CONTEXT_ARGS = {};
 
 	#Make $DEBUG another name for $Net::SSLeay::trace

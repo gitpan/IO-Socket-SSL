@@ -1,4 +1,8 @@
 
+v1.32 2010.02.22
+- Makefile.PL: die if Scalar::Util has no dualvar support instead of
+  only complaining. Thanks to w[DOT]phillip[DOT]moore[AT]gmail[DOT]com
+  for reporting.
 v1.31 2009.09.25
 - add and export constants for SSL_VERIFY_* 
 - set SSL_use_cert if cert is given and not SSL_server
