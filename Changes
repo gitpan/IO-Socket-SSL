@@ -1,4 +1,10 @@
 
+v1.33 2010.03.17
+- attempt to make t/memleak_bad_handshake.t more stable, it fails 
+  for unknown reason on various systems
+- fix hostname checking: an IP should only be checked against 
+  subjectAltName GEN_IPADD, never against GEN_DNS or CN.
+  Thanks to rusch[AT]genua[DOT]de for bug report
 v1.32 2010.02.22
 - Makefile.PL: die if Scalar::Util has no dualvar support instead of
   only complaining. Thanks to w[DOT]phillip[DOT]moore[AT]gmail[DOT]com
