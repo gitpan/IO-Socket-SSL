@@ -78,7 +78,7 @@ BEGIN {
 	}) {
 		@ISA = qw(IO::Socket::INET);
 	}
-	$VERSION = '1.38';
+	$VERSION = '1.39';
 	$GLOBAL_CONTEXT_ARGS = {};
 
 	#Make $DEBUG another name for $Net::SSLeay::trace
@@ -801,6 +801,7 @@ sub close {
 
 	if ( ! $close_args->{_SSL_in_DESTROY} ) {
 		untie( *$self );
+		undef ${*$self}{_SSL_fileno};
 		return $self->SUPER::close;
 	}
 	return 1;
@@ -1950,8 +1951,8 @@ match it checks against the common name, but there are no wildcards allowed.
 
 =item http (rfc2818), alias is www
 
-Extended wildcards in subjectAltNames are possible, e.g. *.example.org or
-even www*.example.org. Wildcards in the common name are not allowed. The common
+Extended wildcards in subjectAltNames and common name are possible, e.g. 
+*.example.org or even www*.example.org. The common
 name will be only checked if no names are given in subjectAltNames.
 
 =item smtp (rfc3207)
