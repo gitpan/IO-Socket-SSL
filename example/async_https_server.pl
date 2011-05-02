@@ -21,6 +21,7 @@ my $server = IO::Socket::INET->new(
 	LocalAddr => '0.0.0.0:9000',
 	Listen => 10,
 	Reuse => 1,
+	Blocking => 0,
 ) || die $!;
 
 event_new( $server, EV_READ|EV_PERSIST, \&_s_accept )->add();
@@ -134,7 +135,7 @@ sub _client_write_response {
 		DEBUG( $SSL_ERROR );
 		if ( $SSL_ERROR == SSL_WANT_READ ) {
 			# retry write once we can read
-			event_new( $fdc, EV_READ, \&_client_write )->add;
+			event_new( $fdc, EV_READ, \&_client_write_response )->add;
 		} else {
 			$event->add; # retry again
 		}
