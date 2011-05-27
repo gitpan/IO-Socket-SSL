@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               IO-Socket-SSL
-version:            1.43_1
+version:            1.44
 abstract:           Nearly transparent SSL encapsulation for IO::Socket::INET.
 author:
     - Steffen Ullrich & Peter Behroozi & Marko Asplund
@@ -17,7 +17,7 @@ no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.54
+generated_by:       ExtUtils::MakeMaker version 6.55_02
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4
