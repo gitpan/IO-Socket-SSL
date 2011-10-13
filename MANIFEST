@@ -42,5 +42,6 @@ t/auto_verify_hostname.t
 t/inet6.t
 t/testlib.pl
 t/memleak_bad_handshake.t
+t/signal-readline.t
 util/export_certs.pl
 META.yml                                 Module meta-data (added by MakeMaker)
