@@ -1,4 +1,9 @@
 
+v1.48 2011.10.26
+- bugfix for readline fix in 1.45. If the pending data where false
+  (like '0') it failed to read rest of line.
+  Thanks to Victor Popov for reporting
+  https://rt.cpan.org/Ticket/Display.html?id=71953
 v1.47 2011.10.21
 - fix for 1.46 - check for mswin32 needs to be /i. Thanks to
   Alexandr Ciornii for reporting
