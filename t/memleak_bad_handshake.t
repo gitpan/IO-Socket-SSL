@@ -15,8 +15,8 @@ if ( grep { $^O =~m{$_}i } qw( MacOS VOS vmesa riscos amigaos mswin32) ) {
     exit
 }
 
-if ( grep { $^O =~m{aix}i ) {
-    print "1..0 # Skipped: might hang, see https://rt.cpan.org/Ticket/Display.html?id=72170\n":
+if ( $^O =~m{aix}i ) {
+    print "1..0 # Skipped: might hang, see https://rt.cpan.org/Ticket/Display.html?id=72170\n";
     exit
 }
 
