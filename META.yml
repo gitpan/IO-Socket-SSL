@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               IO-Socket-SSL
-version:            1.54
+version:            1.55
 abstract:           Nearly transparent SSL encapsulation for IO::Socket::INET.
 author:
     - Steffen Ullrich & Peter Behroozi & Marko Asplund
