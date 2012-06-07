@@ -13,21 +13,21 @@ if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
     exit
 }
 
-# check if we have loaded INET6, IO::Socket::SSL should do it by itself
-# if it is available
-if ( ! $INC{ 'IO/Socket/INET6.pm' } ) {
+# check if we have loaded IO::Socket::IP, IO::Socket::SSL should do it by
+# itself if it is available
+unless( IO::Socket::SSL->CAN_IPV6 eq "IO::Socket::IP" ) {
 	# not available or IO::Socket::SSL forgot to load it
-	if ( ! eval { require IO::Socket::INET6 } ) {
-		print "1..0 # Skipped: no IO::Socket::INET6 available\n";
+	if ( ! eval { require IO::Socket::IP; IO::Socket::IP->VERSION(0.11) } ) {
+		print "1..0 # Skipped: no IO::Socket::IP 0.11 available\n";
 	} else {
-		print "1..1\nnot ok # automatic use of INET6\n";
+		print "1..1\nnot ok # automatic use of IO::Socket::IP\n";
 	}
 	exit
 }
 
 my $addr = '::1';
 # check if we can use ::1, e.g if the computer has IPv6 enabled
-if ( ! IO::Socket::INET6->new(
+if ( ! IO::Socket::IP->new(
 	Listen => 10,
 	LocalAddr => $addr,
 )) {
