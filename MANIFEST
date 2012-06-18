@@ -46,4 +46,5 @@ t/sysread_write.t
 t/testlib.pl
 t/verify_hostname.t
 util/export_certs.pl
-META.yml                                 Module meta-data (added by MakeMaker)
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)

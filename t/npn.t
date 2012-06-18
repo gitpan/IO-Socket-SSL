@@ -16,7 +16,7 @@ if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
 # check if we have NPN available
 # if it is available
 if ( ! exists &Net::SSLeay::P_next_proto_negotiated ) {
-    print "1..0 # NPN not available in Net::SSLeay\n";
+    print "1..0 # Skipped: NPN not available in Net::SSLeay\n";
     exit
 }
 
