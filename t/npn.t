@@ -50,6 +50,7 @@ if ( !defined $pid ) {
     close($server);
     my $to_server = IO::Socket::SSL->new( 
 	PeerHost => $addr,
+	SSL_verify_mode => 0,
 	SSL_npn_protocols => [qw(two three)],
     ) or do {
     	ok(0, "connect failed: ".IO::Socket::SSL->errstr() );
