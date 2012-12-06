@@ -2,6 +2,9 @@
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl t/dhe.t'
 
+# make sure IO::Socket::INET6 will not be used
+BEGIN { $INC{'IO/Socket/INET6.pm'} = undef }
+
 use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
