@@ -21,7 +21,7 @@ use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = 1.81;
+our $VERSION = 1.82;
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -303,7 +303,7 @@ sub configure_SSL {
 	carp(
 	    "*******************************************************************\n".
 	    " Using the default of SSL_verify_mode of SSL_VERIFY_NONE for client\n".
-	    " is depreciated! Please set SSL_verify_mode to SSL_VERIFY_PEER\n".
+	    " is deprecated! Please set SSL_verify_mode to SSL_VERIFY_PEER\n".
 	    " together with SSL_ca_file|SSL_ca_path for verification.\n".
 	    " If you really don't want to verify the certificate and keep the\n".
 	    " connection open to Man-In-The-Middle attacks please set\n".
@@ -1369,10 +1369,21 @@ sub get_ssleay_error {
 
 sub error {
     my ($self, $error, $destroy_socket) = @_;
-    $error .= ' '.Net::SSLeay::ERR_error_string(Net::SSLeay::ERR_get_error());
-    DEBUG(2, $error."\n".$self->get_ssleay_error());
-    $SSL_ERROR = dualvar( -1, $error );
-    ${*$self}{'_SSL_last_err'} = $SSL_ERROR if (ref($self));
+    my @err;
+    while ( my $err = Net::SSLeay::ERR_get_error()) {
+	push @err, Net::SSLeay::ERR_error_string($err);
+	DEBUG(2, $error."\n".$self->get_ssleay_error());
+    }
+    # if no new error occured report last again
+    if ( ! @err and my $err = 
+	ref($self) ? ${*$self}{'_SSL_last_err'} : $SSL_ERROR ) {
+	push @err,$err;
+    }
+    $error .= ' '.join(' ',@err) if @err;
+    if ($error) {
+	$SSL_ERROR = dualvar( -1, $error );
+	${*$self}{'_SSL_last_err'} = $SSL_ERROR if (ref($self));
+    }
     return;
 }
 
@@ -1416,7 +1427,7 @@ sub set_defaults {
 	$GLOBAL_SSL_ARGS->{$k} = $v;
     }
 }
-{ # depreceated API
+{ # deprecated API
     no warnings;
     *set_ctx_defaults = \&set_defaults; 
 }
@@ -2562,7 +2573,7 @@ use close() instead
 
 use the peer_certificate() function instead.
 Used to return X509_Certificate with methods subject_name and issuer_name.
-Now simply returns $self which has these methods (although depreceated).
+Now simply returns $self which has these methods (although deprecated).
 
 =item issuer_name()
 
