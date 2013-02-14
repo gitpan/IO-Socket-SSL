@@ -22,4 +22,4 @@ requires:
   Scalar::Util: 0
 resources:
   repository: https://github.com/noxxi/p5-io-socket-ssl
-version: 1.83
+version: 1.831
