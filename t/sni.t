@@ -10,11 +10,13 @@ if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
     exit
 }
 
-# subjectAltNames are not supported or buggy in older versions,
-# so certificates cannot be checked
-if ( $Net::SSLeay::VERSION < 1.50
-    or Net::SSLeay::OPENSSL_VERSION_NUMBER() < 0x009080ef ) {
-    print "1..0 # Skipped because openssl/Net::SSleay too old\n";
+if ( ! IO::Socket::SSL->can_server_sni() ) {
+    print "1..0 # skipped because no server side SNI support - openssl/Net::SSleay too old\n";
+    exit;
+}
+
+if ( ! IO::Socket::SSL->can_client_sni() ) {
+    print "1..0 # skipped because no client side SNI support - openssl/Net::SSleay too old\n";
     exit;
 }
 
