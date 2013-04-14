@@ -20,7 +20,7 @@ use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = 1.84;
+our $VERSION = 1.85;
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -55,6 +55,7 @@ my $GLOBAL_SSL_ARGS = {};
 
 # non-XS Versions of Scalar::Util will fail
 BEGIN{
+    local $SIG{__DIE__}; local $SIG{__WARN__}; # be silent
     eval { use Scalar::Util 'dualvar'; dualvar(0,'') };
     die "You need the XS Version of Scalar::Util for dualvar() support"
 	if $@;
@@ -87,6 +88,7 @@ BEGIN {
     # declare @ISA depeding of the installed socket class
 
     # try to load inet_pton from Socket or Socket6
+    local $SIG{__DIE__}; local $SIG{__WARN__}; # be silent
     my $ip6 = eval {
 	require Socket;
 	Socket->VERSION(1.95);
@@ -198,7 +200,8 @@ sub import {
 	    @caller_force_inet4 = caller(); # save for warnings for 'inet6' case
 	} elsif ( /^inet6$/i ) {
 	    # check if we have already ipv6 as base
-	    if ( ! UNIVERSAL::isa( $class, 'IO::Socket::INET6' )) {
+	    if ( ! UNIVERSAL::isa( $class, 'IO::Socket::INET6')
+		and ! UNIVERSAL::isa( $class, 'IO::Socket::IP' )) {
 		# either we don't support it or we disabled it by explicitly
 		# loading it with 'inet4'. In this case re-enable but warn
 		# because this is probably an error
@@ -272,7 +275,6 @@ sub configure {
 
 sub configure_SSL {
     my ($self, $arg_hash) = @_;
-
     my $is_server = $arg_hash->{'SSL_server'} || $arg_hash->{'Listen'} || 0;
 
     # add user defined defaults
@@ -2749,6 +2751,11 @@ IO::Socket::SSL depends on Net::SSLeay.  Up to version 1.43 of Net::SSLeay
 it was not thread safe, although it did probably work if you did not use 
 SSL_verify_callback and SSL_password_cb.
 
+If you use IO::Socket::SSL together with threads you should load it (e.g. use or
+require) inside the main thread before creating any other threads which use it.
+This way it is much faster because it will be initialized only once. Also there
+are reports that it might crash the other way.
+
 Creating an IO::Socket::SSL object in one thread and closing it in another
 thread will not work.
 
@@ -2814,23 +2821,9 @@ use peer_certificate( 'subject' ) instead
 
 =back
 
-The following classes have been removed:
-
-=over 2
-
-=item SSL_SSL
-
-(not that you should have been directly accessing this anyway):
-
-=item X509_Certificate
-
-(but get_peer_certificate() will still Do The Right Thing)
-
-=back
-
 =head1 SEE ALSO
 
-IO::Socket::INET, IO::Socket::INET6, Net::SSLeay.
+IO::Socket::INET, IO::Socket::INET6, IO::Socket::IP, Net::SSLeay.
 
 =head1 AUTHORS
 
@@ -2844,11 +2837,11 @@ Patches incorporated from various people, see file Changes.
 
 =head1 COPYRIGHT
 
-Working support for non-blocking was added by Steffen Ullrich.
+The original versions of this module are Copyright (C) 1999-2002 Marko Asplund.
 
 The rewrite of this module is Copyright (C) 2002-2005 Peter Behroozi.
 
-The original versions of this module are Copyright (C) 1999-2002 Marko Asplund.
+Versions 0.98 and newer are Copyright (C) 2006-2013 Steffen Ullrich.
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
