@@ -3,6 +3,7 @@ certs/client-cert.pem
 certs/client-key.enc
 certs/client-key.pem
 certs/my-ca.pem
+certs/proxyca.pem
 certs/server-cert.pem
 certs/server-key.enc
 certs/server-key.pem
@@ -15,6 +16,7 @@ example/async_https_server.pl
 example/lwp-with-verifycn.pl
 example/ssl_client.pl
 example/ssl_server.pl
+example/ssl_mitm.pl
 Makefile.PL
 MANIFEST
 patches/Net_SSLeay.patch
@@ -46,6 +48,7 @@ t/sysread_write.t
 t/testlib.pl
 t/verify_hostname.t
 t/sni.t
+t/mitm.t
 util/export_certs.pl
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)

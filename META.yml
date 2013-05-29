@@ -18,8 +18,8 @@ no_index:
     - t
     - inc
 requires:
-  Net::SSLeay: 1.21
+  Net::SSLeay: 1.46
   Scalar::Util: 0
 resources:
   repository: https://github.com/noxxi/p5-io-socket-ssl
-version: 1.89
+version: 1.90
