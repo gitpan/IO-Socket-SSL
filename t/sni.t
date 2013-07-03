@@ -68,6 +68,7 @@ if ( $pid == 0 ) {
 	    PeerPort => $SSL_SERVER_PORT,
 	    SSL_verify_mode => 1,
 	    SSL_hostname => $host,
+	    SSL_ca_file => 'certs/my-ca.pem',
 	) || print "not ";
 	print "ok # client ssl connect $host\n";
 
