@@ -14,13 +14,13 @@
 package IO::Socket::SSL;
 
 use IO::Socket;
-use Net::SSLeay 1.21;
+use Net::SSLeay 1.46;
 use Exporter ();
 use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = '1.953';
+our $VERSION = '1.954';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -1938,7 +1938,7 @@ IO::Socket::SSL -- SSL sockets with IO::Socket interface
 
 	# easy hostname verification 
 	SSL_verifycn_name => 'foo.bar', # defaults to PeerHost
-	SSL_verifycn_schema => 'http',
+	SSL_verifycn_scheme => 'http',
 
 	# SNI support
 	SSL_hostname => 'foo.bar', # defaults to PeerHost
