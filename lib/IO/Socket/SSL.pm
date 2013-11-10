@@ -20,7 +20,7 @@ use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = '1.955';
+our $VERSION = '1.956';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -31,6 +31,18 @@ use constant SSL_VERIFY_CLIENT_ONCE => Net::SSLeay::VERIFY_CLIENT_ONCE();
 use constant SSL_SENT_SHUTDOWN => 1;
 use constant SSL_RECEIVED_SHUTDOWN => 2;
 
+# capabilities of underlying Net::SSLeay/openssl
+my $can_client_sni;  # do we support SNI on the client side
+my $can_server_sni;  # do we support SNI on the server side
+my $can_npn;         # do we support NPN
+my $can_ecdh;        # do we support ECDH key exchange
+BEGIN {
+    $can_client_sni = Net::SSLeay::OPENSSL_VERSION_NUMBER() >= 0x01000000;
+    $can_server_sni = defined &Net::SSLeay::get_servername;
+    $can_npn        = defined &Net::SSLeay::P_next_proto_negotiated;
+    $can_ecdh       = defined &Net::SSLeay::CTX_set_tmp_ecdh;
+}
+
 # global defaults
 my %DEFAULT_SSL_ARGS = (
     SSL_check_crl => 0,
@@ -39,8 +51,9 @@ my %DEFAULT_SSL_ARGS = (
     SSL_verifycn_scheme => undef,  # don't verify cn
     SSL_verifycn_name => undef,    # use from PeerAddr/PeerHost
     SSL_npn_protocols => undef,    # meaning depends whether on server or client side
-    SSL_honor_cipher_order => 0,   # client order gets preference
-    SSL_cipher_list => 'ALL:!LOW',
+    SSL_cipher_list => 
+	'EECDH+AESGCM+ECDSA EECDH+AESGCM EECDH+ECDSA +AES256 EECDH EDH+AESGCM '.
+	'EDH ALL +SHA +3DES +RC4 !LOW !EXP !eNULL !aNULL !DES !MD5 !PSK !SRP',
 );
 
 my %DEFAULT_SSL_CLIENT_ARGS = (
@@ -50,7 +63,28 @@ my %DEFAULT_SSL_CLIENT_ARGS = (
 
 my %DEFAULT_SSL_SERVER_ARGS = (
     %DEFAULT_SSL_ARGS,
-    SSL_verify_mode => SSL_VERIFY_NONE
+    SSL_verify_mode => SSL_VERIFY_NONE,
+    SSL_honor_cipher_order => 1,   # trust server to know the best cipher
+    SSL_dh => do {
+        my $bio = Net::SSLeay::BIO_new(Net::SSLeay::BIO_s_mem());
+        # generated with: openssl dhparam 2048
+        Net::SSLeay::BIO_write($bio,<<'DH');
+-----BEGIN DH PARAMETERS-----
+MIIBCAKCAQEAr8wskArj5+1VCVsnWt/RUR7tXkHJ7mGW7XxrLSPOaFyKyWf8lZht
+iSY2Lc4oa4Zw8wibGQ3faeQu/s8fvPq/aqTxYmyHPKCMoze77QJHtrYtJAosB9SY
+CN7s5Hexxb5/vQ4qlQuOkVrZDiZO9GC4KaH9mJYnCoAsXDhDft6JT0oRVSgtZQnU
+gWFKShIm+JVjN94kGs0TcBEesPTK2g8XVHK9H8AtSUb9BwW2qD/T5RmgNABysApO
+Ps2vlkxjAHjJcqc3O+OiImKik/X2rtBTZjpKmzN3WWTB0RJZCOWaLlDO81D01o1E
+aZecz3Np9KIYey900f+X7zC2bJxEHp95ywIBAg==
+-----END DH PARAMETERS-----
+DH
+        my $dh = Net::SSLeay::PEM_read_bio_DHparams($bio);
+        Net::SSLeay::BIO_free($bio);
+        $dh or die "no DH";
+        $dh;
+    },
+    $can_ecdh ? ( SSL_ecdh_curve => 'prime256v1' ):(),
+
 );
 
 # global defaults which can be changed using set_defaults
@@ -184,15 +218,6 @@ BEGIN {
     }
 }
 
-my $can_client_sni;  # do we support SNI on the client side
-my $can_server_sni;  # do we support SNI on the server side
-my $can_npn;         # do we support NPN
-BEGIN {
-    $can_client_sni = Net::SSLeay::OPENSSL_VERSION_NUMBER() >= 0x01000000;
-    $can_server_sni = defined &Net::SSLeay::get_servername;
-    $can_npn        = defined &Net::SSLeay::P_next_proto_negotiated;
-}
-
 # Export some stuff
 # inet4|inet6|debug will be handled by myself, everything
 # else will be handled the Exporter way
@@ -267,7 +292,6 @@ sub configure {
 
     # because Net::HTTPS simple redefines blocking() to {} (e.g
     # return undef) and IO::Socket::INET does not like this we
-
     # set Blocking only explicitly if it was set
     $arg_hash->{Blocking} = 1 if defined ($blocking);
 
@@ -282,7 +306,12 @@ sub configure {
 
 sub configure_SSL {
     my ($self, $arg_hash) = @_;
-    my $is_server = $arg_hash->{'SSL_server'} || $arg_hash->{'Listen'} || 0;
+
+    $arg_hash->{Proto} ||= 'tcp';
+    my $is_server = $arg_hash->{SSL_server};
+    if ( ! defined $is_server ) {
+	$is_server = $arg_hash->{SSL_server} = $arg_hash->{Listen} || 0;
+    }
 
     # add user defined defaults
     %$arg_hash = ( 
@@ -291,131 +320,22 @@ sub configure_SSL {
 	%$arg_hash 
     );
 
-    # common problem forgetting to set SSL_use_cert
-    # if client cert is given by user but SSL_use_cert is undef, assume that it
-    # should be set
-    if ( ! $is_server && ! defined $arg_hash->{SSL_use_cert}
-	&& ( grep { $arg_hash->{$_} } qw(SSL_cert SSL_cert_file))
-	&& ( grep { $arg_hash->{$_} } qw(SSL_key SSL_key_file)) ) {
-	$arg_hash->{SSL_use_cert} = 1
-    }
-
-    # library defaults
-    my %default_args = (
-	Proto => 'tcp',
-	SSL_server => $is_server,
-	SSL_use_cert => $is_server,
-	$is_server ? %DEFAULT_SSL_SERVER_ARGS : %DEFAULT_SSL_CLIENT_ARGS,
-    );
-
-    # add defaults to arg_hash
-    %$arg_hash = ( %default_args, %$arg_hash );
-
-    # use default path to certs and ca unless another one was given
-    # don't mix default path with user specified path, either we use all
-    # or no defaults
-    {
-	my $use_default = 1;
-	for (qw( SSL_cert SSL_cert_file SSL_key SSL_key_file SSL_ca_file SSL_ca_path )) {
-	    next if ! defined $arg_hash->{$_};
-	    # some apps set keys '' to signal that it is not set, replace with undef
-	    if ( $arg_hash->{$_} eq '' ) {
-		$arg_hash->{$_} = undef;
-		next;
-	    }
-	    $use_default = 0;
-	}
-
-	$use_default = 0 if $use_default and
-	    ! $is_server && $arg_hash->{SSL_verify_mode} == SSL_VERIFY_NONE
-	    || $arg_hash->{SSL_reuse_ctx};
-
-	if ( $use_default ) {
-
-	    my %ca = 
-		-f 'certs/my-ca.pem' ? ( SSL_ca_file => 'certs/my-ca.pem' ) :
-		-d 'ca/' ? ( SSL_ca_path => 'ca/' ) :
-		();
-	    my %certs = $is_server ? (
-		SSL_key_file => 'certs/server-key.pem',
-		SSL_cert_file => 'certs/server-cert.pem',
-	    ) : $arg_hash->{SSL_use_cert} ? (
-		SSL_key_file => 'certs/client-key.pem',
-		SSL_cert_file => 'certs/client-cert.pem',
-	    ) :();
-	    %$arg_hash = ( %$arg_hash, %ca, %certs );
-
-	    carp(
-		"*******************************************************************\n".
-		" The implicite use of IO::Socket::SSL specific default settings for \n".
-		" CA, cert and key is depreceated.\n".
-		" Please explicitly specify your own CA, cert and key using:\n".
-		"    - SSL_ca_file or SSL_ca_path for the CA\n".
-		"    - SSL_cert_file and SSL_key_file for cert and key\n".
-		" To specify your own system wide defaults you can use \n".
-		" set_defaults, set_client_defaults and set_server_defaults.\n".
-		"*******************************************************************\n".
-		" "
-	    ) if %ca or %certs;
-
-
-	} else {
-	    for(qw(SSL_cert_file SSL_key_file)) {
-		defined( my $file = $arg_hash->{$_} ) or next;
-		for my $f (ref($file) eq 'HASH' ? values(%$file):$file ) {
-		    die "$_ $f does not exist" if ! -f $f;
-		    die "$_ $f is not accessable" if ! -r _;
-		}
-	    }
-	    if ( defined( my $f = $arg_hash->{SSL_ca_file} )) {
-		die "SSL_ca_file $f does not exist" if ! -f $f;
-		die "SSL_ca_file $f is not accessable" if ! -r _;
-	    }
-	    if ( defined( my $d = $arg_hash->{SSL_ca_path} )) {
-		die "only SSL_ca_path or SSL_ca_file should be given" 
-		    if defined $arg_hash->{SSL_ca_file};
-		die "SSL_ca_path $d does not exist" if ! -d $d;
-		die "SSL_ca_path $d is not accessable" if ! -r _;
-	    }
+    my $ctx = $arg_hash->{'SSL_reuse_ctx'};
+    if ($ctx) {
+	if ($ctx->isa('IO::Socket::SSL::SSL_Context') and
+	    $ctx->{context}) {
+	    # valid context
+	} elsif ( $ctx = ${*$ctx}{_SSL_ctx} ) {
+	    # reuse context from existing SSL object
 	}
     }
 
-    #Avoid passing undef arguments to Net::SSLeay
-    defined($arg_hash->{$_}) or delete($arg_hash->{$_}) foreach (keys %$arg_hash);
-
-    my $vcn_scheme = delete $arg_hash->{SSL_verifycn_scheme};
-    if ( $vcn_scheme && $vcn_scheme ne 'none' ) {
-	# don't access ${*self} inside callback - this seems to create
-	# circular references from the ssl object to the context and back
-
-	# use SSL_verifycn_name or determine from PeerAddr
-	my $host = $arg_hash->{SSL_verifycn_name};
-	if (not defined($host)) {
-	    if ( $host = $arg_hash->{PeerAddr} || $arg_hash->{PeerHost} ) {
-		$host =~s{:[a-zA-Z0-9_\-]+$}{};
-	    }
-	}
-	$host ||= ref($vcn_scheme) && $vcn_scheme->{callback} && 'unknown';
-	$host or return $self->error( "Cannot determine peer hostname for verification" );
-
-	my $vcb = $arg_hash->{SSL_verify_callback};
-	$arg_hash->{SSL_verify_callback} = sub {
-	    my ($ok,$ctx_store,$certname,$error,$cert) = @_;
-	    $ok = $vcb->($ok,$ctx_store,$certname,$error,$cert) if $vcb;
-	    $ok or return 0;
-	    my $depth = Net::SSLeay::X509_STORE_CTX_get_error_depth($ctx_store);
-	    return $ok if $depth != 0;
-
-	    # verify name
-	    my $rv = verify_hostname_of_cert( $host,$cert,$vcn_scheme );
-	    # just do some code here against optimization because x509 has no
-	    # increased reference and CRYPTO_add is not available from Net::SSLeay
-	    return $rv;
-	};
-    }
+    # create context
+    # this will fill in defaults in $arg_hash
+    $ctx ||= IO::Socket::SSL::SSL_Context->new($arg_hash);
 
     ${*$self}{'_SSL_arguments'} = $arg_hash;
-    ${*$self}{'_SSL_ctx'} = IO::Socket::SSL::SSL_Context->new($arg_hash) || return;
+    ${*$self}{'_SSL_ctx'} = $ctx;
     ${*$self}{'_SSL_opened'} = 1 if $is_server;
 
     return $self;
@@ -480,11 +400,6 @@ sub connect_SSL {
 
 	Net::SSLeay::set_fd($ssl, $fileno)
 	    || return $self->error("SSL filehandle association failed");
-
-	if ( my $cl = $arg_hash->{SSL_cipher_list} ) {
-	    Net::SSLeay::set_cipher_list($ssl, $cl )
-		|| return $self->error("Failed to set SSL cipher list");
-	}
 
 	if ( $can_client_sni ) {
 	    my $host;
@@ -676,11 +591,6 @@ sub accept_SSL {
 
 	Net::SSLeay::set_fd($ssl, $fileno)
 	    || return $socket->error("SSL filehandle association failed");
-
-	if ( my $cl = $arg_hash->{SSL_cipher_list} ) {
-	    Net::SSLeay::set_cipher_list($ssl, $cl )
-		|| return $socket->error("Failed to set SSL cipher list");
-	}
     }
 
     $ssl ||= ${*$socket}{'_SSL_object'};
@@ -1222,43 +1132,69 @@ sub dump_peer_certificate {
     #  - wildcards_in_alt (0, 'leftmost', 'anywhere')
     #  - wildcards_in_cn (0, 'leftmost', 'anywhere')
     #  - check_cn (0, 'always', 'when_only')
+    # unfortunatly there are a lot of different schemes used, see RFC 6125 for a
+    # summary, which references all of the following except RFC4217/ftp
 
     my %scheme = (
-	# rfc 4513
-	ldap => {
-	    wildcards_in_cn  => 0,
-	    wildcards_in_alt => 'leftmost',
-	    check_cn         => 'always',
-	},
-	# rfc 2818
-	http => {
-	    wildcards_in_cn  => 'anywhere',
-	    wildcards_in_alt => 'anywhere',
-	    check_cn         => 'when_only',
-	},
-	# rfc 3207
-	# This is just a dumb guess
-	# RFC3207 itself just says, that the client should expect the
-	# domain name of the server in the certificate. It doesn't say
-	# anything about wildcards, so I forbid them. It doesn't say
-	# anything about alt names, but other documents show, that alt
-	# names should be possible. The check_cn value again is a guess.
-	# Fix the spec!
-	smtp => {
-	    wildcards_in_cn  => 0,
-	    wildcards_in_alt => 0,
-	    check_cn         => 'always'
-	},
 	none => {}, # do not check
     );
 
-    $scheme{www}  = $scheme{http}; # alias
-    $scheme{xmpp} = $scheme{http}; # rfc 3920
-    $scheme{pop3} = $scheme{ldap}; # rfc 2595
-    $scheme{imap} = $scheme{ldap}; # rfc 2595
-    $scheme{acap} = $scheme{ldap}; # rfc 2595
-    $scheme{nntp} = $scheme{ldap}; # rfc 4642
-    $scheme{ftp}  = $scheme{http}; # rfc 4217
+    for(qw(
+	rfc2818 http www 
+	rfc3920 xmpp
+	rfc4217 ftp
+    )) {
+	$scheme{$_} = {
+	    wildcards_in_cn  => 'anywhere',
+	    wildcards_in_alt => 'anywhere',
+	    check_cn         => 'when_only',
+	}
+    }
+
+    for(qw(
+	rfc4513 ldap
+    )) {
+	$scheme{$_} = {
+	    wildcards_in_cn  => 0,
+	    wildcards_in_alt => 'leftmost',
+	    check_cn         => 'always',
+	};
+    }
+
+    for(qw(
+	rfc2595 smtp
+	rfc4642 imap pop3 acap
+	rfc5539 nntp
+	rfc5538 netconf
+	rfc5425 syslog
+	rfc5953 snmp
+    )) {
+	$scheme{$_} = {
+	    wildcards_in_cn  => 'leftmost',
+	    wildcards_in_alt => 'leftmost',
+	    check_cn         => 'always'
+	};
+    }
+    for(qw(
+	rfc5971 gist
+    )) {
+	$scheme{$_} = {
+	    wildcards_in_cn  => 'leftmost',
+	    wildcards_in_alt => 'leftmost',
+	    check_cn         => 'when_only',
+	};
+    }
+
+    for(qw(
+	rfc5922 sip
+    )) {
+	$scheme{$_} = {
+	    wildcards_in_cn  => 0,
+	    wildcards_in_alt => 0,
+	    check_cn         => 'always',
+	};
+    }
+
 
     # function to verify the hostname
     #
@@ -1312,15 +1248,19 @@ sub dump_peer_certificate {
 	    $wtyp ||= '';
 	    my $pattern;
 	    ### IMPORTANT!
-	    # we accept only a single wildcard and only for a single part of the FQDN
+	    # We accept only a single wildcard and only for a single part of the FQDN
 	    # e.g *.example.org does match www.example.org but not bla.www.example.org
 	    # The RFCs are in this regard unspecific but we don't want to have to
 	    # deal with certificates like *.com, *.co.uk or even *
-	    # see also http://nils.toedtmann.net/pub/subjectAltName.txt
+	    # see also http://nils.toedtmann.net/pub/subjectAltName.txt .
+	    # Also, we fall back to leftmost matches if the identity is an IDNA
+	    # name, see RFC6125 and the discussion at 
+	    # http://bugs.python.org/issue17997#msg194950
 	    if ( $wtyp eq 'anywhere' and $name =~m{^([a-zA-Z0-9_\-]*)\*(.+)} ) {
-		$pattern = qr{^\Q$1\E[a-zA-Z0-9_\-]*\Q$2\E$}i;
+		return if $1 ne '' and substr($identity,0,4) eq 'xn--'; # IDNA
+		$pattern = qr{^\Q$1\E[a-zA-Z0-9_\-]+\Q$2\E$}i;
 	    } elsif ( $wtyp eq 'leftmost' and $name =~m{^\*(\..+)$} ) {
-		$pattern = qr{^[a-zA-Z0-9_\-]*\Q$1\E$}i;
+		$pattern = qr{^[a-zA-Z0-9_\-]+\Q$1\E$}i;
 	    } else {
 		$pattern = qr{^\Q$name\E$}i;
 	    }
@@ -1586,14 +1526,124 @@ sub new {
     #DEBUG( "$class @_" );
     my $arg_hash = (ref($_[0]) eq 'HASH') ? $_[0] : {@_};
 
-    my $ctx_object = $arg_hash->{'SSL_reuse_ctx'};
-    if ($ctx_object) {
-	return $ctx_object if ($ctx_object->isa('IO::Socket::SSL::SSL_Context') and
-	    $ctx_object->{context});
+    # common problem forgetting to set SSL_use_cert
+    # if client cert is given by user but SSL_use_cert is undef, assume that it
+    # should be set
+    my $is_server = $arg_hash->{SSL_server};
+    if ( ! $is_server && ! defined $arg_hash->{SSL_use_cert}
+	&& ( grep { $arg_hash->{$_} } qw(SSL_cert SSL_cert_file))
+	&& ( grep { $arg_hash->{$_} } qw(SSL_key SSL_key_file)) ) {
+	$arg_hash->{SSL_use_cert} = 1
+    }
 
-	# The following "double entendre" applies only if someone passed
-	# in an IO::Socket::SSL object instead of an actual context.
-	return $ctx_object if ($ctx_object = ${*$ctx_object}{'_SSL_ctx'});
+    # add library defaults
+    %$arg_hash = (
+	SSL_use_cert => $is_server,
+	$is_server ? %DEFAULT_SSL_SERVER_ARGS : %DEFAULT_SSL_CLIENT_ARGS,
+	%$arg_hash 
+    );
+
+    # Avoid passing undef arguments to Net::SSLeay
+    defined($arg_hash->{$_}) or delete($arg_hash->{$_}) for(keys %$arg_hash);
+
+    # use default path to certs and ca unless another one was given
+    # don't mix default path with user specified path, either we use all
+    # or no defaults
+    {
+	my $use_default = 1;
+	for (qw( SSL_cert SSL_cert_file SSL_key SSL_key_file SSL_ca_file SSL_ca_path )) {
+	    next if ! defined $arg_hash->{$_};
+	    # some apps set keys '' to signal that it is not set, replace with undef
+	    if ( $arg_hash->{$_} eq '' ) {
+		$arg_hash->{$_} = undef;
+		next;
+	    }
+	    $use_default = 0;
+	}
+
+	$use_default = 0 if $use_default 
+	    and ! $is_server 
+	    and ! $arg_hash->{SSL_verify_mode};
+
+	if ( $use_default ) {
+
+	    my %ca = 
+		-f 'certs/my-ca.pem' ? ( SSL_ca_file => 'certs/my-ca.pem' ) :
+		-d 'ca/' ? ( SSL_ca_path => 'ca/' ) :
+		();
+	    my %certs = $is_server ? (
+		SSL_key_file => 'certs/server-key.pem',
+		SSL_cert_file => 'certs/server-cert.pem',
+	    ) : $arg_hash->{SSL_use_cert} ? (
+		SSL_key_file => 'certs/client-key.pem',
+		SSL_cert_file => 'certs/client-cert.pem',
+	    ) :();
+	    %$arg_hash = ( %$arg_hash, %ca, %certs );
+
+	    carp(
+		"*******************************************************************\n".
+		" The implicite use of IO::Socket::SSL specific default settings for \n".
+		" CA, cert and key is depreceated.\n".
+		" Please explicitly specify your own CA, cert and key using:\n".
+		"    - SSL_ca_file or SSL_ca_path for the CA\n".
+		"    - SSL_cert_file and SSL_key_file for cert and key\n".
+		" To specify your own system wide defaults you can use \n".
+		" set_defaults, set_client_defaults and set_server_defaults.\n".
+		"*******************************************************************\n".
+		" "
+	    ) if %ca or %certs;
+
+	} else {
+	    for(qw(SSL_cert_file SSL_key_file)) {
+		defined( my $file = $arg_hash->{$_} ) or next;
+		for my $f (ref($file) eq 'HASH' ? values(%$file):$file ) {
+		    die "$_ $f does not exist" if ! -f $f;
+		    die "$_ $f is not accessable" if ! -r _;
+		}
+	    }
+	    if ( defined( my $f = $arg_hash->{SSL_ca_file} )) {
+		die "SSL_ca_file $f does not exist" if ! -f $f;
+		die "SSL_ca_file $f is not accessable" if ! -r _;
+	    }
+	    if ( defined( my $d = $arg_hash->{SSL_ca_path} )) {
+		die "only SSL_ca_path or SSL_ca_file should be given" 
+		    if defined $arg_hash->{SSL_ca_file};
+		die "SSL_ca_path $d does not exist" if ! -d $d;
+		die "SSL_ca_path $d is not accessable" if ! -r _;
+	    }
+	}
+    }
+
+    my $vcn_scheme = delete $arg_hash->{SSL_verifycn_scheme};
+    if ( $vcn_scheme && $vcn_scheme ne 'none' ) {
+	# don't access ${*self} inside callback - this seems to create
+	# circular references from the ssl object to the context and back
+
+	# use SSL_verifycn_name or determine from PeerAddr
+	my $host = $arg_hash->{SSL_verifycn_name};
+	if (not defined($host)) {
+	    if ( $host = $arg_hash->{PeerAddr} || $arg_hash->{PeerHost} ) {
+		$host =~s{:[a-zA-Z0-9_\-]+$}{};
+	    }
+	}
+	$host ||= ref($vcn_scheme) && $vcn_scheme->{callback} && 'unknown';
+	$host or return IO::Socket::SSL->error(
+	    "Cannot determine peer hostname for verification" );
+
+	my $vcb = $arg_hash->{SSL_verify_callback};
+	$arg_hash->{SSL_verify_callback} = sub {
+	    my ($ok,$ctx_store,$certname,$error,$cert) = @_;
+	    $ok = $vcb->($ok,$ctx_store,$certname,$error,$cert) if $vcb;
+	    $ok or return 0;
+	    my $depth = Net::SSLeay::X509_STORE_CTX_get_error_depth($ctx_store);
+	    return $ok if $depth != 0;
+
+	    # verify name
+	    my $rv = IO::Socket::SSL::verify_hostname_of_cert( $host,$cert,$vcn_scheme );
+	    # just do some code here against optimization because x509 has no
+	    # increased reference and CRYPTO_add is not available from Net::SSLeay
+	    return $rv;
+	};
     }
 
     my $ssl_op = Net::SSLeay::OP_ALL();
@@ -1621,9 +1671,11 @@ sub new {
     }
 
     my $ctx_new_sub =  UNIVERSAL::can( 'Net::SSLeay',
-	$ver eq 'SSLv2' ? 'CTX_v2_new' :
-	$ver eq 'SSLv3' ? 'CTX_v3_new' :
-	$ver eq 'TLSv1' ? 'CTX_tlsv1_new' :
+	$ver eq 'SSLv2'  ? 'CTX_v2_new' :
+	$ver eq 'SSLv3'  ? 'CTX_v3_new' :
+	$ver eq 'TLSv1'  ? 'CTX_tlsv1_new' :
+	$ver eq 'TLSv11' ? 'CTX_tlsv1_1_new' :
+	$ver eq 'TLSv12' ? 'CTX_tlsv1_2_new' :
 	'CTX_new'
     ) or return IO::Socket::SSL->error("SSL Version $ver not supported");
     my $ctx = $ctx_new_sub->() or return 
@@ -1764,11 +1816,7 @@ sub new {
 	    });
 	}
 
-	if ( my $dh = $arg_hash->{SSL_dh} ) {
-	    # binary, e.g. DH*
-	    Net::SSLeay::CTX_set_tmp_dh( $ctx,$dh )
-		|| return IO::Socket::SSL->error( "Failed to set DH from SSL_dh" );
-	} elsif ( my $f = $arg_hash->{SSL_dh_file} ) {
+	if ( my $f = $arg_hash->{SSL_dh_file} ) {
 	    my $bio = Net::SSLeay::BIO_new_file( $f,'r' )
 		|| return IO::Socket::SSL->error( "Failed to open DH file $f" );
 	    my $dh = Net::SSLeay::PEM_read_bio_DHparams($bio);
@@ -1777,12 +1825,16 @@ sub new {
 	    my $rv = Net::SSLeay::CTX_set_tmp_dh( $ctx,$dh );
 	    Net::SSLeay::DH_free( $dh );
 	    $rv || return IO::Socket::SSL->error( "Failed to set DH from $f" );
+	} elsif ( my $dh = $arg_hash->{SSL_dh} ) {
+	    # binary, e.g. DH*
+	    Net::SSLeay::CTX_set_tmp_dh( $ctx,$dh )
+		|| return IO::Socket::SSL->error( "Failed to set DH from SSL_dh" );
 	}
 
 	if ( my $curve = $arg_hash->{SSL_ecdh_curve} ) {
 	    return IO::Socket::SSL->error(
 		"ECDH curve needs Net::SSLeay>=1.56 and OpenSSL>=1.0")
-		if ! defined( &Net::SSLeay::CTX_set_tmp_ecdh );
+		if ! $can_ecdh;
 	    if ( $curve !~ /^\d+$/ ) {
 		# name of curve, find NID
 		$curve = Net::SSLeay::OBJ_txt2nid($curve) 
@@ -1816,32 +1868,34 @@ sub new {
 
     Net::SSLeay::CTX_set_verify($ctx, $verify_mode, $verify_callback);
 
+    if ( my $cl = $arg_hash->{SSL_cipher_list} ) {
+	Net::SSLeay::CTX_set_cipher_list($ctx, $cl )
+	    || return IO::Socket::SSL->error("Failed to set SSL cipher list");
+    }
+
     if ( my $cb = $arg_hash->{SSL_create_ctx_callback} ) {
 	$cb->($ctx);
     }
 
-    $ctx_object = { context => $ctx };
-    $ctx_object->{has_verifycb} = 1 if $verify_callback;
+    my $self = bless { context => $ctx },$class;
+    $self->{has_verifycb} = 1 if $verify_callback;
     $DEBUG>=3 && DEBUG( "new ctx $ctx" );
     $CTX_CREATED_IN_THIS_THREAD{$ctx} = 1;
 
     if ( my $cache = $arg_hash->{SSL_session_cache} ) {
 	# use predefined cache
-	$ctx_object->{session_cache} = $cache
+	$self->{session_cache} = $cache
     } elsif ( my $size = $arg_hash->{SSL_session_cache_size}) {
-	return IO::Socket::SSL->error("Session caches not supported for Net::SSLeay < v1.26")
-	    if $Net::SSLeay::VERSION < 1.26;
-	$ctx_object->{session_cache} = IO::Socket::SSL::Session_Cache->new( $size );
+	$self->{session_cache} = IO::Socket::SSL::Session_Cache->new( $size );
     }
 
-
-    return bless $ctx_object, $class;
+    return $self;
 }
 
 
 sub session_cache {
-    my $ctx = shift;
-    my $cache = $ctx->{'session_cache'} || return;
+    my $self = shift;
+    my $cache = $self->{session_cache} || return;
     my ($addr,$port,$session) = @_;
     $port ||= $addr =~s{:(\w+)$}{} && $1; # host:port
     my $key = "$addr:$port";
@@ -1926,8 +1980,8 @@ sub add_session {
 sub DESTROY {
     my $self = shift;
     delete(@{$self}{'_head','_maxsize'});
-    foreach my $key (keys %$self) {
-	Net::SSLeay::SESSION_free($self->{$key}->{session});
+    for (values %$self) {
+	Net::SSLeay::SESSION_free($_->{session} || next);
     }
 }
 
@@ -2085,8 +2139,10 @@ See section "SNI Support" for details of SNI the support.
 =item SSL_version
 
 Sets the version of the SSL protocol used to transmit data. 'SSLv23' auto-negotiates 
-between SSLv2 and SSLv3, while 'SSLv2', 'SSLv3' or 'TLSv1' restrict the protocol
-to the specified version. All values are case-insensitive.
+between SSLv2 and SSLv3, while 'SSLv2', 'SSLv3', 'TLSv1', 'TLSv11' or 'TLSv12'
+restrict the protocol to the specified version. All values are case-insensitive.
+Support for 'TLSv11' and 'TLSv12' requires recent versions of Net::SSLeay
+and openssl.
 
 You can limit to set of supported protocols by adding !version separated by ':'.
 
@@ -2103,21 +2159,22 @@ case setting the version to 'SSLv23:!SSLv2:!TLSv11:!TLSv12' might help.
 =item SSL_cipher_list
 
 If this option is set the cipher list for the connection will be set to the
-given value, e.g. something like 'ALL:!LOW:!EXP:!ADH'. Look into the OpenSSL
+given value, e.g. something like 'ALL:!LOW:!EXP:!aNULL'. Look into the OpenSSL
 documentation (L<http://www.openssl.org/docs/apps/ciphers.html#CIPHER_STRINGS>)
 for more details.
 
-If this option is not set 'ALL:!LOW' will be used.
+If this option is not set a secure default will be used, which prefers ciphers
+with forward secrecy, disables anonymous authentication and disables known
+insecure ciphers like MD5, DES etc.
 To use OpenSSL builtin default (whatever this is) set it to ''.
+But, with the IO::Socket::SSL own default cipher list one currently gets a grade
+A at SSL labs, much better than the openssl default.
 
 =item SSL_honor_cipher_order
 
 If this option is true the cipher order the server specified is used instead
-of the order proposed by the client. To mitigate BEAST attack you might use
-something like
-
-  SSL_honor_cipher_order => 1,
-  SSL_cipher_list => 'RC4-SHA:ALL:!ADH:!LOW',
+of the order proposed by the client. This option defaults to true to make use of
+our secure cipher list setting.
 
 =item SSL_use_cert
 
@@ -2177,8 +2234,13 @@ Examples:
 
 If you want Diffie-Hellman key exchange you need to supply a suitable file here
 or use the SSL_dh parameter. See dhparam command in openssl for more information.
-To create a server which provides perfect forward secrecy you need to either
-give the DH parameters or (better, because faster) the ECDH curve.
+To create a server which provides forward secrecy you need to either give the DH
+parameters or (better, because faster) the ECDH curve.
+
+If neither C<SSL_dh_file> not C<SSL_dh> is set a builtin DH parameter with a
+length of 2048 bit is used to offer DH key exchange by default. If you don't
+want this (e.g. disable DH key exchange) explicitly set this or the C<SSL_dh>
+parameter to undef.
 
 =item SSL_dh
 
@@ -2188,8 +2250,11 @@ Like SSL_dh_file, but instead of giving a file you use a preloaded or generated 
 
 If you want Elliptic Curve Diffie-Hellmann key exchange you need to supply the
 OID or NID of a suitable curve (like 'prime256v1') here.
-To create a server which provides perfect forward secrecy you need to either
-give the DH parameters or (better, because faster) the ECDH curve.
+To create a server which provides forward secrecy you need to either give the DH
+parameters or (better, because faster) the ECDH curve.
+
+This parameter defaults to 'prime256v1' (builtin of OpenSSL) to offer ECDH key
+exchange by default. If you don't want this explicitly set it to undef.
 
 =item SSL_passwd_cb
 
@@ -2288,8 +2353,7 @@ SSL_check_crl.
 
 =item SSL_reuse_ctx
 
-If you have already set the above options (SSL_version through SSL_check_crl;
-this does not include SSL_cipher_list yet) for a previous instance of
+If you have already set the above options for a previous instance of
 IO::Socket::SSL, then you can reuse the SSL context of that instance by passing
 it as the value for the SSL_reuse_ctx parameter.  You may also create a
 new instance of the IO::Socket::SSL::SSL_Context class, using any context options
