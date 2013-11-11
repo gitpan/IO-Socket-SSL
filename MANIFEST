@@ -51,5 +51,4 @@ t/sni.t
 t/mitm.t
 t/ecdhe.t
 util/export_certs.pl
-META.yml                                 Module YAML meta-data (added by MakeMaker)
-META.json                                Module JSON meta-data (added by MakeMaker)
+META.yml                                 Module meta-data (added by MakeMaker)
