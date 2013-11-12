@@ -1,3 +1,5 @@
+1.959 2013/11/12
+- bugfix test core.t windows only
 1.958 2013/11/11
 - cleanup: remove workaround for old IO::Socket::INET6 but instead require at
   least version 2.55 which is now 5 years old
