@@ -20,7 +20,7 @@ use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = '1.962';
+our $VERSION = '1.963';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -938,46 +938,31 @@ sub stop_SSL {
     $stop_args->{SSL_no_shutdown} = 1 if ! ${*$self}{_SSL_opened};
 
     if (my $ssl = ${*$self}{'_SSL_object'}) {
-	my $shutdown_done;
-	if ( $stop_args->{SSL_no_shutdown} ) {
-	    $shutdown_done = 1;
-	} else {
-	    my $fast = $stop_args->{SSL_fast_shutdown};
+	if ( ! $stop_args->{SSL_no_shutdown} ) {
 	    my $status = Net::SSLeay::get_shutdown($ssl);
-	    if ( $fast && $status != 0) {
-		# shutdown done, either status has
-		# SSL_SENT_SHUTDOWN or SSL_RECEIVED_SHUTDOWN or both,
-		# so the handshake is at least in process
-		$shutdown_done = 1;
-	    } elsif ( ( $status & SSL_SENT_SHUTDOWN ) == 0 ) {
-		# need to initiate/continue shutdown
-		local $SIG{PIPE} = 'IGNORE';
-		for my $try (1,2 ) {
-		    my $rv = Net::SSLeay::shutdown($ssl);
-		    if ( $rv < 0 ) {
-			# non-blocking socket?
-			$self->_set_rw_error( $ssl,$rv );
-			# need to try again
-			return;
-		    } elsif ( $rv
-			|| ( $rv == 0 && $fast )) {
-			# shutdown finished
-			$shutdown_done = 1;
-			last;
-		    } else {
-			# shutdown partly initiated (e.g. one direction)
-			# call again
-		    }
+	    while (1) {
+		if ( $status & SSL_SENT_SHUTDOWN and
+		    # don't care for received if fast shutdown
+		    $status & SSL_RECEIVED_SHUTDOWN 
+			|| $stop_args->{SSL_fast_shutdown}) {
+		    # shutdown complete
+		    last;
 		}
-	    } elsif ( $status & SSL_RECEIVED_SHUTDOWN ) {
-		# SSL_SENT_SHUTDOWN is done already (previous if-case)
-		# and because SSL_RECEIVED_SHUTDOWN is done also we
-		# consider the shutdown done
-		$shutdown_done = 1;
+
+		# initiate or complete shutdown
+		local $SIG{PIPE} = 'IGNORE';
+		my $rv = Net::SSLeay::shutdown($ssl);
+		if ( $rv < 0 ) {
+		    # non-blocking socket?
+		    $self->_set_rw_error( $ssl,$rv );
+		    # need to try again
+		    return;
+		}
+
+		$status |= SSL_SENT_SHUTDOWN;
+		$status |= SSL_RECEIVED_SHUTDOWN if $rv>0;
 	    }
 	}
-
-	return if ! $shutdown_done;
 	Net::SSLeay::free($ssl);
 	delete ${*$self}{_SSL_object};
     }
@@ -1066,12 +1051,22 @@ sub start_SSL {
     if ( ! defined($start_handshake) || $start_handshake ) {
 	# if we have no callback force blocking mode
 	$DEBUG>=2 && DEBUG( "start handshake" );
-	my $blocking = $socket->blocking(1);
+	my $was_blocking = $socket->blocking(1);
 	my $result = ${*$socket}{'_SSL_arguments'}{SSL_server}
 	    ? $socket->accept_SSL(%to)
 	    : $socket->connect_SSL(%to);
-	$socket->blocking(0) if !$blocking;
-	return $result ? $socket : (bless($socket, $original_class) && ());
+	if ( $result ) {
+	    $socket->blocking(0) if ! $was_blocking;
+	    return $socket;
+	} else {
+	    # upgrade to SSL failed, downgrade socket to original class
+	    if ( $original_class ) {
+		bless($socket,$original_class);
+		$socket->blocking(0) if ! $was_blocking 
+		    && $socket->can('blocking');
+	    }
+	    return;
+	}
     } else {
 	$DEBUG>=2 && DEBUG( "dont start handshake: $socket" );
 	return $socket; # just return upgraded socket
@@ -2008,7 +2003,7 @@ IO::Socket::SSL -- SSL sockets with IO::Socket interface
     use IO::Socket::SSL;
 
     # simple HTTP client -----------------------------------------------
-    my $sock = IO::Socket::SSL->new(
+    my $client = IO::Socket::SSL->new(
 	# where to connect
 	PeerHost => "www.example.com",
 	PeerPort => "https",
@@ -2119,14 +2114,47 @@ full-featured SSL client or server application: multiple SSL contexts, cipher
 selection, certificate verification, Server Name Indication (SNI), Next
 Protocol Negotiation (NPN), SSL version selection and more.
 
-If you have never used SSL before, you should read the appendix labelled 'Using SSL'
+If you have never used SSL before, you should read the section 'Using SSL'
 before attempting to use this module.
+
+If you used IO::Socket before you should read the following section
+'Differences to IO::Socket'.
 
 If you want to use SSL with non-blocking sockets and/or within an event loop
 please read very carefully the sections about non-blocking I/O and polling of SSL
 sockets.
 
 If you are trying to use it with threads see the BUGS section.
+
+=head2 Differences to IO::Socket
+
+Although L<IO::Socket::SSL> tries to behave similar to L<IO::Socket> there are
+some important differences due to the way SSL works:
+
+=over 4
+
+=item * buffered input
+
+Data are transmitted inside the SSL protocol using encrypted frames, which can
+only be decrypted once the full frame is received. So if you use C<read> or
+C<sysread> to receive less data than the SSL frame contains, it will read the
+whole frame, return part of it and buffer the rest for later reads. 
+This does not make a difference for simple programs, but if you use
+select-loops or polling or non-blocking I/O please read the related sections.
+
+=item * SSL handshakes
+
+Before any encryption can be done the peers have to agree to common algorithms,
+verify certificates etc. So a handshake needs to be done before any payload is
+send or received and might additionally happen later in the connection again.
+
+This has important implications when doing non-blocking or event-based I/O
+(please read the related sections), but means also, that connect and accept
+calls include the SSL handshake and thus might block or fail, if the peer does
+not behave like expected. For instance accept will wait infinitly if a TCP
+client connects to the socket but does not initiate an SSL handshake.
+
+=back
 
 =head1 METHODS
 
@@ -2172,7 +2200,10 @@ section about SSL specific error handling.
 =item B<new(...)>
 
 Creates a new IO::Socket::SSL object.  You may use all the friendly options
-that came bundled with IO::Socket::INET, plus (optionally) the ones that follow:
+that came bundled with the super class (e.g. IO::Socket::IP,
+IO::Socket::INET, ...) plus (optionally) the ones described below.
+If you don't specify any SSL related options it will do it's best in using
+secure defaults, e.g. chosing good ciphers, enabling proper verification etc.
 
 =over 2
 
@@ -2489,6 +2520,23 @@ throw an error.
 
 =back
 
+=item B<accept>
+
+This behaves similar to the accept function of the underlying socket class, but
+additionally does the initial SSL handshake. But because the underlying socket
+class does return a blocking file handle even when accept is called on a
+non-blocking socket, the SSL handshake on the new file object will be done in a
+blocking way. Please see the section about non-blocking I/O for details.
+If you don't like this behavior you should do accept on the TCP socket and then
+upgrade it with C<start_SSL> later. 
+
+=item B<connect(...)>
+
+This behaves similar to the connnect function but also does an SSL handshake.
+Because you cannot give SSL specific arguments to this function, you should
+better either use C<new> to create a connect SSL socket or C<start_SSL> to
+upgrade an established TCP socket to SSL.
+
 =item B<close(...)>
 
 There are a number of nasty traps that lie in wait if you are not careful about using
@@ -2509,12 +2557,16 @@ If set to a true value, this option will make close() not use the SSL_shutdown()
 on the socket in question so that the close operation can complete without problems
 if you have used shutdown() or are working on a copy of a socket.
 
+Not using a real ssl shutdown on a socket will make session caching unusable.
+
 =item SSL_fast_shutdown
 
 If set to true only a unidirectional shutdown will be done, e.g. only the
-close_notify (see SSL_shutdown(3)) will be called. Otherwise a bidirectional
-shutdown will be done. If used within close() it defaults to true, if used
-within stop_SSL() it defaults to false.
+close_notify (see SSL_shutdown(3)) will be sent. Otherwise a bidirectional
+shutdown will be done where it waits for the close_notify of the peer too.
+
+Because a unidirectional shutdown is enough to keep session cache working it
+defaults to fast shutdown inside close.
 
 =item SSL_ctx_free
 
@@ -2742,15 +2794,25 @@ in fact close() calls stop_SSL() (but without downgrading the class).
 Will return true if it succeeded and undef if failed. This might be the case for
 non-blocking sockets. In this case $! is set to EAGAIN and the ssl error to
 SSL_WANT_READ or SSL_WANT_WRITE. In this case the call should be retried again with
-the same arguments once the socket is ready is until it succeeds.
+the same arguments once the socket is ready.
 
-=item B<< IO::Socket::SSL->new_from_fd($fd, ...) >>
+For calling from C<stop_SSL> C<SSL_fast_shutdown> default to false, e.g. it
+waits for the close_notify of the peer. This is necesarry in case you want to
+downgrade the socket and continue to use it as a plain socket.
+
+=item B<< IO::Socket::SSL->new_from_fd($fd, [mode], %sslargs) >>
 
 This will convert a socket identified via a file descriptor into an SSL socket.
 Note that the argument list does not include a "MODE" argument; if you supply one,
-it will be thoughtfully ignored (for compatibility with IO::Socket::INET).	Instead,
+it will be thoughtfully ignored (for compatibility with IO::Socket::INET). Instead,
 a mode of '+<' is assumed, and the file descriptor passed must be able to handle such
 I/O because the initial SSL handshake requires bidirectional communication.
+
+Internally the given $fd will be upgraded to a socket object using the
+C<new_from_fd> method of the super class (L<IO::Socket::INET> or similar) and then
+C<start_SSL> will be called using the given C<%sslargs>.
+If C<$fd> is already an IO::Socket object you should better call C<start_SSL>
+directly.
 
 =item B<IO::Socket::SSL::set_default_context(...)>
 
@@ -2907,6 +2969,15 @@ And, while the behavior is not documented for other L<IO::Socket> classes, it
 will try to emulate the behavior seen there, e.g. to return the received data
 instead of blocking, even if the line is not complete. If an unrecoverable error
 occurs it will return nothing, even if it already received some data.
+
+Also, I would advise against using C<accept> with a non-blocking SSL object,
+because it might block and this is not what most would expect. The reason for
+this is that accept on a non-blocking TCP socket (e.g. IO::Socket::IP,
+IO::Socket::INET..) results in a new TCP socket, which does not inherit the
+non-blocking behavior of the master socket. And thus the initial SSL handshake
+on the new socket inside C<IO::Socket::SSL::accept> will be done in a blocking
+way. To work around it you should better do an TCP accept and later upgrade the
+TCP socket in a non-blocking way with C<start_SSL> and C<accept_SSL>.
 
 =head1 SNI Support
 
