@@ -20,7 +20,7 @@ use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = '1.966';
+our $VERSION = '1.967';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -139,7 +139,7 @@ BEGIN{
 }
 
 # get constants for SSL_OP_NO_* now, instead calling the releated functions
-# everytime we setup a connection
+# every time we setup a connection
 my %SSL_OP_NO;
 for(qw( SSLv2 SSLv3 TLSv1 TLSv1_1 TLSv11:TLSv1_1 TLSv1_2 TLSv12:TLSv1_2 )) {
     my ($k,$op) = m{:} ? split(m{:},$_,2) : ($_,$_);
@@ -216,7 +216,7 @@ BEGIN {
     #Make $DEBUG another name for $Net::SSLeay::trace
     *DEBUG = \$Net::SSLeay::trace;
 
-    #Compability
+    #Compatibility
     *ERROR = \$SSL_ERROR;
 
     # Do Net::SSLeay initialization
@@ -1150,11 +1150,18 @@ sub dump_peer_certificate {
     #  - wildcards_in_alt (0, 'leftmost', 'anywhere')
     #  - wildcards_in_cn (0, 'leftmost', 'anywhere')
     #  - check_cn (0, 'always', 'when_only')
-    # unfortunatly there are a lot of different schemes used, see RFC 6125 for a
+    # unfortunately there are a lot of different schemes used, see RFC 6125 for a
     # summary, which references all of the following except RFC4217/ftp
 
     my %scheme = (
 	none => {}, # do not check
+	# default set is a superset of all the others and thus worse than a more
+	# specific set, but much better than not verifying name at all
+	default => {
+	    wildcards_in_cn  => 'anywhere',
+	    wildcards_in_alt => 'anywhere',
+	    check_cn         => 'always',
+	},
     );
 
     for(qw(
@@ -1223,7 +1230,7 @@ sub dump_peer_certificate {
     sub verify_hostname_of_cert {
 	my $identity = shift;
 	my $cert = shift;
-	my $scheme = shift || 'none';
+	my $scheme = shift || 'default';
 	if ( ! ref($scheme) ) {
 	    $DEBUG>=3 && DEBUG( "scheme=$scheme cert=$cert" );
 	    $scheme = $scheme{$scheme} or croak "scheme $scheme not defined";
@@ -1326,6 +1333,18 @@ sub get_servername {
 	my $ssl = $self->_get_ssl_object or return;
 	Net::SSLeay::get_servername($ssl);
     };
+}
+
+sub get_fingerprint_bin {
+    my $cert = shift()->peer_certificate;
+    return Net::SSLeay::X509_get_fingerprint($cert,shift() || 'sha256');
+}
+
+sub get_fingerprint {
+    my ($self,$algo) = @_;
+    $algo ||= 'sha256';
+    my $fp = get_fingerprint_bin($self,$algo) or return;
+    return $algo.'$'.unpack('H*',$fp);
 }
 
 sub get_cipher {
@@ -1588,7 +1607,9 @@ sub new {
     # or no defaults
     {
 	my $use_default = 1;
-	for (qw( SSL_cert SSL_cert_file SSL_key SSL_key_file SSL_ca_file SSL_ca_path )) {
+	for (qw( SSL_cert SSL_cert_file SSL_key SSL_key_file
+	    SSL_ca_file SSL_ca_path
+	    SSL_fingerprint )) {
 	    next if ! defined $arg_hash->{$_};
 	    # some apps set keys '' to signal that it is not set, replace with undef
 	    if ( $arg_hash->{$_} eq '' ) {
@@ -1635,24 +1656,24 @@ sub new {
 		defined( my $file = $arg_hash->{$_} ) or next;
 		for my $f (ref($file) eq 'HASH' ? values(%$file):$file ) {
 		    die "$_ $f does not exist" if ! -f $f;
-		    die "$_ $f is not accessable" if ! -r _;
+		    die "$_ $f is not accessible" if ! -r _;
 		}
 	    }
 	    if ( defined( my $f = $arg_hash->{SSL_ca_file} )) {
 		die "SSL_ca_file $f does not exist" if ! -f $f;
-		die "SSL_ca_file $f is not accessable" if ! -r _;
+		die "SSL_ca_file $f is not accessible" if ! -r _;
 	    }
 	    if ( defined( my $d = $arg_hash->{SSL_ca_path} )) {
 		die "only SSL_ca_path or SSL_ca_file should be given"
 		    if defined $arg_hash->{SSL_ca_file};
 		die "SSL_ca_path $d does not exist" if ! -d $d;
-		die "SSL_ca_path $d is not accessable" if ! -r _;
+		die "SSL_ca_path $d is not accessible" if ! -r _;
 	    }
 	}
     }
 
     my $vcn_scheme = delete $arg_hash->{SSL_verifycn_scheme};
-    if ( $vcn_scheme && $vcn_scheme ne 'none' ) {
+    if ( ! $vcn_scheme or $vcn_scheme ne 'none' ) {
 	# don't access ${*self} inside callback - this seems to create
 	# circular references from the ssl object to the context and back
 
@@ -1664,23 +1685,45 @@ sub new {
 	    }
 	}
 	$host ||= ref($vcn_scheme) && $vcn_scheme->{callback} && 'unknown';
-	$host or return IO::Socket::SSL->error(
-	    "Cannot determine peer hostname for verification" );
+	if ( ! $host ) {
+	    return IO::Socket::SSL->error(
+		"Cannot determine peer hostname for verification" )
+		if $vcn_scheme;
+	} elsif ( ! $vcn_scheme && $host =~m{^[\d.]+$|:} ) {
+	    # don't try to verify IP by default
+	} else {
+	    my $vcb = $arg_hash->{SSL_verify_callback};
+	    $arg_hash->{SSL_verify_callback} = sub {
+		my ($ok,$ctx_store,$certname,$error,$cert) = @_;
+		$ok = $vcb->($ok,$ctx_store,$certname,$error,$cert) if $vcb;
+		$ok or return 0;
+		return $ok if
+		    Net::SSLeay::X509_STORE_CTX_get_error_depth($ctx_store) !=0;
 
-	my $vcb = $arg_hash->{SSL_verify_callback};
-	$arg_hash->{SSL_verify_callback} = sub {
-	    my ($ok,$ctx_store,$certname,$error,$cert) = @_;
-	    $ok = $vcb->($ok,$ctx_store,$certname,$error,$cert) if $vcb;
-	    $ok or return 0;
-	    my $depth = Net::SSLeay::X509_STORE_CTX_get_error_depth($ctx_store);
-	    return $ok if $depth != 0;
+		# verify name
+		my $rv = IO::Socket::SSL::verify_hostname_of_cert(
+		    $host,$cert,$vcn_scheme );
+		if ( ! $rv && ! $vcn_scheme ) {
+		    # For now we use the default hostname verification if none
+		    # was specified and complain loudly but return ok if it does
+		    # not match. In the future we will enforce checks and users
+		    # should better specify and explicite verification scheme.
+		    warn <<WARN;
 
-	    # verify name
-	    my $rv = IO::Socket::SSL::verify_hostname_of_cert( $host,$cert,$vcn_scheme );
-	    # just do some code here against optimization because x509 has no
-	    # increased reference and CRYPTO_add is not available from Net::SSLeay
-	    return $rv;
-	};
+The verification of cert '$certname'
+failed against the host '$host' with the default verification scheme.
+
+   THIS MIGHT BE A MAN-IN-THE-MIDDLE ATTACK !!!!
+
+To stop this warning you might need to set SSL_verifycn_name to
+the name of the host you expect in the certificate.
+
+WARN
+		    return 1;
+		}
+		return $rv;
+	    };
+	}
     }
 
     my $ssl_op = Net::SSLeay::OP_ALL();
@@ -1884,7 +1927,18 @@ sub new {
     }
 
     my $verify_cb = $arg_hash->{SSL_verify_callback};
-    my $verify_callback = $verify_cb && sub {
+    my @accept_fp;
+    if ( my $fp = $arg_hash->{SSL_fingerprint} ) {
+	for( ref($fp) ? @$fp : $fp) {
+	    my ($algo,$digest) = m{^([\w-]+)\$([a-f\d:]+)$}i;
+	    return IO::Socket::SSL->error("invalid fingerprint '$_'")
+		if ! $algo;
+	    $algo = lc($algo);
+	    ( $digest = lc($digest) ) =~s{:}{}g;
+	    push @accept_fp,[ $algo, pack('H*',$digest) ]
+	}
+    }
+    my $verify_callback = ( $verify_cb || @accept_fp) && sub {
 	my ($ok, $ctx_store) = @_;
 	my ($certname,$cert,$error);
 	if ($ctx_store) {
@@ -1895,6 +1949,15 @@ sub new {
 	    $error &&= Net::SSLeay::ERR_error_string($error);
 	}
 	$DEBUG>=3 && DEBUG( "ok=$ok cert=$cert" );
+	if ( $cert && @accept_fp ) {
+	    my %fp;
+	    for(@accept_fp) {
+		my $fp = $fp{$_->[0]} ||= 
+		    Net::SSLeay::X509_get_fingerprint($cert,$_->[0]);
+		return 1 if $fp eq $_->[1];
+	    }
+	}
+	return $ok if ! $verify_cb;
 	return $verify_cb->($ok,$ctx_store,$certname,$error,$cert);
     };
 
@@ -2391,10 +2454,26 @@ Usually you want to verify that the peer certificate has been signed by a
 trusted certificate authority. In this case you should use this option to
 specify the file (SSL_ca_file) or directory (SSL_ca_path) containing the
 certificateZ<>(s) of the trusted certificate authorities.
-If both SSL_ca_file and SSL_ca_path are undefined and not builtin defaults (see
-"Defaults for Cert, Key and CA".) can be used, it will try to use the system
-defaults used built into the OpenSSL library.
+If both SSL_ca_file and SSL_ca_path are undefined and builtin defaults (see
+"Defaults for Cert, Key and CA".) can not be used, the system
+defaults built into the OpenSSL library will be tried.
 If you really don't want to set a CA set this key to C<''>.
+
+=item SSL_fingerprint
+
+Sometimes you have a self-signed certificate or a certificate issued by an
+unknown CA and you really want to accept it, but don't want to disable
+verification at all. In this case you can specify the fingerprint of the
+certificate as C<'algo$hex_fingerprint'>. C<algo> is a fingerprint algorithm
+supported by OpenSSL, e.g. 'sha1','sha256'... and C<hex_fingerprint> is the
+hexadecimal representation of the binary fingerprint. 
+To get the fingerprint of an established connection you can use
+C<get_fingerprint>.
+
+You can specify a list of fingerprints in case you have several acceptable
+certificates.
+If a fingerprint matches no additional verification of the certificate will be
+done.
 
 =item SSL_verify_mode
 
@@ -2441,13 +2520,26 @@ See the OpenSSL documentation for SSL_CTX_set_verify for more information.
 
 =item SSL_verifycn_scheme
 
-Set the scheme used to automatically verify the hostname of the peer.
+The scheme is used to correctly verify the identity inside the certificate
+by using the hostname of the peer.
 See the information about the verification schemes in B<verify_hostname>.
 
-The default is undef, e.g. to not automatically verify the hostname.
-If no verification is done the other B<SSL_verifycn_*> options have
-no effect, but you might still do manual verification by calling
-B<verify_hostname>.
+If you don't specify a scheme it will use 'default', but only complain loudly if
+the name verification fails instead of letting the whole certificate
+verification fail. THIS WILL CHANGE, e.g. it will let the certificate
+verification fail in the future if the hostname does not match the certificate !!!!
+To override the name used in verification use B<SSL_verifycn_name>.
+
+The scheme 'default' is a superset of the usual schemes, which will accept the
+hostname in common name and subjectAltName and allow wildcards everywhere.
+While using this scheme is way more secure than no name verification at all you
+better should use the scheme specific to your application protocol, e.g. 'http',
+'ftp'...
+
+If you are really sure, that you don't want to verify the identity using the
+hostname  you can use 'none' as a scheme. In this case you'd better have
+alternative forms of verification, like a certificate fingerprint or do a manual
+verification later by calling B<verify_hostname> yourself.
 
 =item SSL_verifycn_name
 
@@ -2625,7 +2717,7 @@ L<IO::Socket> objects, e.g. it returns at most LEN bytes of data.
 But in reality it reads not only LEN bytes from the underlying socket, but at
 a single SSL frame. It then returns up to LEN bytes it decrypted from this SSL
 frame. If the frame contained more data than requested it will return only LEN
-data, buffer the rest and return it on futher read calls.
+data, buffer the rest and return it on further read calls.
 This means, that it might be possible to read data, even if the underlying
 socket is not readable, so using poll or select might not be sufficient.
 
@@ -2666,6 +2758,16 @@ requires OpenSSL 0.9.6a or later to work.
 This function gives you the number of bytes available without reading from the
 underlying socket object. This function is essential if you work with event
 loops, please see the section about polling SSL sockets.
+
+=item B<get_fingerprint([algo])>
+
+This methods returns the fingerprint of the peer certificate in the form
+C<algo$digest_hex>, where C<algo> is the used algorithm, default 'sha256'.
+
+=item B<get_fingerprint_bin([algo])>
+
+This methods returns the binary fingerprint of the peer certificate by using the
+algorithm C<algo>, default 'sha256'.
 
 =item B<get_cipher()>
 
@@ -2958,8 +3060,8 @@ or C<certs/client-key.pem>.
 
 =item SSL_ca_file | SSL_ca_path
 
-It will set SSL_ca_file to C<certs/my-ca.pem> if it exist.
-Otherwise it will set SSL_ca_path to C<ca/> if it exist.
+SSL_ca_file will be set to C<certs/my-ca.pem> if it exists.
+Otherwise SSL_ca_path will be set to C<ca/> if it exists.
 
 =back
 
