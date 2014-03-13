@@ -1,7 +1,7 @@
 {
    "abstract" : "Nearly transparent SSL encapsulation for IO::Socket::INET.",
    "author" : [
-      "Steffen Ullrich <sullr.org>, Peter Behroozi, Marko Asplund"
+      "Steffen Ullrich <sullr@cpan.org>, Peter Behroozi, Marko Asplund"
    ],
    "dynamic_config" : 1,
    "generated_by" : "ExtUtils::MakeMaker version 6.66, CPAN::Meta::Converter version 2.120921",
@@ -32,6 +32,7 @@
       },
       "runtime" : {
          "requires" : {
+            "Mozilla::CA" : "0",
             "Net::SSLeay" : "1.46",
             "Scalar::Util" : "0"
          }
@@ -50,5 +51,5 @@
          "url" : "https://github.com/noxxi/p5-io-socket-ssl"
       }
    },
-   "version" : "1.967"
+   "version" : "1.968"
 }
