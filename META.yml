@@ -18,7 +18,6 @@ no_index:
     - t
     - inc
 requires:
-  Mozilla::CA: 0
   Net::SSLeay: 1.46
   Scalar::Util: 0
 resources:
@@ -26,4 +25,4 @@ resources:
   homepage: https://github.com/noxxi/p5-io-socket-ssl
   license: http://dev.perl.org/licenses/
   repository: https://github.com/noxxi/p5-io-socket-ssl
-version: 1.968
+version: 1.969
