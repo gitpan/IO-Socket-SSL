@@ -21,7 +21,7 @@ use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = '1.978';
+our $VERSION = '1.979';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -1233,8 +1233,8 @@ if ( defined &Net::SSLeay::get_peer_cert_chain
     }
 
     # known schemes, possible attributes are:
-    #  - wildcards_in_alt (0, 'leftmost', 'anywhere')
-    #  - wildcards_in_cn (0, 'leftmost', 'anywhere')
+    #  - wildcards_in_alt (0, 'full_label', 'anywhere')
+    #  - wildcards_in_cn (0, 'full_label', 'anywhere')
     #  - check_cn (0, 'always', 'when_only')
     # unfortunately there are a lot of different schemes used, see RFC 6125 for a
     # summary, which references all of the following except RFC4217/ftp
@@ -1267,7 +1267,7 @@ if ( defined &Net::SSLeay::get_peer_cert_chain
     )) {
 	$scheme{$_} = {
 	    wildcards_in_cn  => 0,
-	    wildcards_in_alt => 'leftmost',
+	    wildcards_in_alt => 'full_label',
 	    check_cn         => 'always',
 	};
     }
@@ -1281,8 +1281,8 @@ if ( defined &Net::SSLeay::get_peer_cert_chain
 	rfc5953 snmp
     )) {
 	$scheme{$_} = {
-	    wildcards_in_cn  => 'leftmost',
-	    wildcards_in_alt => 'leftmost',
+	    wildcards_in_cn  => 'full_label',
+	    wildcards_in_alt => 'full_label',
 	    check_cn         => 'always'
 	};
     }
@@ -1290,8 +1290,8 @@ if ( defined &Net::SSLeay::get_peer_cert_chain
 	rfc5971 gist
     )) {
 	$scheme{$_} = {
-	    wildcards_in_cn  => 'leftmost',
-	    wildcards_in_alt => 'leftmost',
+	    wildcards_in_cn  => 'full_label',
+	    wildcards_in_alt => 'full_label',
 	    check_cn         => 'when_only',
 	};
     }
@@ -1365,13 +1365,14 @@ if ( defined &Net::SSLeay::get_peer_cert_chain
 	    # The RFCs are in this regard unspecific but we don't want to have to
 	    # deal with certificates like *.com, *.co.uk or even *
 	    # see also http://nils.toedtmann.net/pub/subjectAltName.txt .
-	    # Also, we fall back to leftmost matches if the identity is an IDNA
+	    # Also, we fall back to full_label matches if the identity is an IDNA
 	    # name, see RFC6125 and the discussion at
 	    # http://bugs.python.org/issue17997#msg194950
 	    if ( $wtyp eq 'anywhere' and $name =~m{^([a-zA-Z0-9_\-]*)\*(.+)} ) {
 		return if $1 ne '' and substr($identity,0,4) eq 'xn--'; # IDNA
 		$pattern = qr{^\Q$1\E[a-zA-Z0-9_\-]+\Q$2\E$}i;
-	    } elsif ( $wtyp eq 'leftmost' and $name =~m{^\*(\..+)$} ) {
+	    } elsif ( $wtyp =~ m{^(?:full_label|leftmost)$} 
+		and $name =~m{^\*(\..+)$} ) {
 		$pattern = qr{^[a-zA-Z0-9_\-]+\Q$1\E$}i;
 	    } else {
 		return lc($identity) eq lc($name);
@@ -3008,27 +3009,47 @@ checking and for the possible values.
 Verification of hostname against a certificate is different between various
 applications and RFCs. Some scheme allow wildcards for hostnames, some only
 in subjectAltNames, and even their different wildcard schemes are possible.
+RFC 6125 provides a good overview.
 
-To ease the verification the following schemes are predefined:
+To ease the verification the following schemes are predefined (both protocol
+name and rfcXXXX name can be used):
 
 =over 8
 
-=item ldap (rfc4513), pop3,imap,acap (rfc2995), nntp (rfc4642)
-
-Simple wildcards in subjectAltNames are possible, e.g. *.example.org matches
-www.example.org but not lala.www.example.org. If nothing from subjectAltNames
-match it checks against the common name, but there are no wildcards allowed.
-
-=item http (rfc2818), alias is www
+=item http (alias www, rfc2818), xmpp (rfc3920), ftp (rfc4217)
 
 Extended wildcards in subjectAltNames and common name are possible, e.g.
 *.example.org or even www*.example.org. The common
-name will be only checked if no names are given in subjectAltNames.
+name will be only checked if no DNS names are given in subjectAltNames.
 
-=item smtp (rfc3207)
+=item smtp (rfc2595), imap, pop3, acap (rfc4642), netconf (rfc5538), syslog (rfc5425), snmp (rfc5953)
 
-This RFC doesn't say much useful about the verification so it just assumes
-that subjectAltNames are possible, but no wildcards are possible anywhere.
+Simple wildcards in subjectAltNames are possible, e.g. *.example.org matches
+www.example.org but not lala.www.example.org. If nothing from subjectAltNames
+match it checks against the common name, where wildcards are also allowed to
+match the full leftmost label.
+
+=item ldap (rfc4513)
+
+Simple wildcards are allowed in subjectAltNames, but not in common name.
+Common name will be checked even if subjectAltNames exist.
+
+=item sip (rfc5922)
+
+No wildcards are allowed and common name is checked even if subjectAltNames
+exist.
+
+=item gist (rfc5971)
+
+Simple wildcards are allowed in subjectAltNames and common name, but common name
+will only be checked if their are no DNS names in subjectAltNames.
+
+=item default
+
+This is a superset of all the rules and is automatically used if no scheme is
+given but a hostname (instead of IP) is known.
+Extended wildcards are allowed in subjectAltNames and common name and common
+name is checked always.
 
 =item none
 
@@ -3048,14 +3069,16 @@ Determines if the common name gets checked. If 'always' it will always be checke
 (like in ldap), if 'when_only' it will only be checked if no names are given in
 subjectAltNames (like in http), for any other values the common name will not be checked.
 
-=item wildcards_in_alt: 0|'leftmost'|'anywhere'
+=item wildcards_in_alt: 0|'full_label'|'anywhere'
 
-Determines if and where wildcards in subjectAltNames are possible. If 'leftmost'
+Determines if and where wildcards in subjectAltNames are possible. If 'full_label'
 only cases like *.example.org will be possible (like in ldap), for 'anywhere'
 www*.example.org is possible too (like http), dangerous things like but www.*.org
 or even '*' will not be allowed.
+For compatibility with older versions 'leftmost' can be given instead of
+'full_label'.
 
-=item wildcards_in_cn: 0|'leftmost'|'anywhere'
+=item wildcards_in_cn: 0|'full_label'|'anywhere'
 
 Similar to wildcards_in_alt, but checks the common name. There is no predefined
 scheme which allows wildcards in common names.
