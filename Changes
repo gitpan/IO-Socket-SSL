@@ -1,3 +1,13 @@
+1.981 2014/04/08
+- #95432 fix ecdhe Test for openssl1.0.1d, thanks to  paul[AT]city-fan[DOT]org
+- fix detection of openssl1.0.1d (detected 1.0.1e instead)
+- new function can_ecdh in IO::Socket::SSL
+1.980 2014/04/08
+- fixed incorrect calculation of certificate fingerprint in get_fingerprint*
+  and comparison in SSL_fingerprint. Thanks to
+  david[DT]palmer[AT]gradwell[DOT]com for reporting.
+- disable elliptic curve support for openssl 1.0.1d on 64bit because of
+  openssl rt#2975
 1.979 2014/04/06
 - hostname checking: 
   - configuration of 'leftmost' is renamed to 'full_label', but the old
