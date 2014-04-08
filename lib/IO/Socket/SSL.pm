@@ -21,7 +21,7 @@ use Errno qw( EAGAIN ETIMEDOUT );
 use Carp;
 use strict;
 
-our $VERSION = '1.979';
+our $VERSION = '1.980';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -41,8 +41,25 @@ BEGIN {
     $can_client_sni = Net::SSLeay::OPENSSL_VERSION_NUMBER() >= 0x01000000;
     $can_server_sni = defined &Net::SSLeay::get_servername;
     $can_npn        = defined &Net::SSLeay::P_next_proto_negotiated;
-    $can_ecdh       = defined &Net::SSLeay::CTX_set_tmp_ecdh;
+    $can_ecdh       = defined &Net::SSLeay::CTX_set_tmp_ecdh && 
+	# There is a regression with elliptic curves on 1.0.1d with 64bit
+	# http://rt.openssl.org/Ticket/Display.html?id=2975
+	( Net::SSLeay::OPENSSL_VERSION_NUMBER() != 0x1000105f
+	|| length(pack("P",0)) == 4 );
 }
+
+my $algo2digest = do {
+    my %digest;
+    sub {
+	my $digest_name = shift;
+	return $digest{$digest_name} ||= do {
+	    Net::SSLeay::SSLeay_add_ssl_algorithms();
+	    Net::SSLeay::EVP_get_digestbyname($digest_name)
+		or die "Digest algorithm $digest_name is not available";
+	};
+    }
+};
+
 
 # global defaults
 my %DEFAULT_SSL_ARGS = (
@@ -1434,7 +1451,7 @@ sub get_servername {
 
 sub get_fingerprint_bin {
     my $cert = shift()->peer_certificate;
-    return Net::SSLeay::X509_get_fingerprint($cert,shift() || 'sha256');
+    return Net::SSLeay::X509_digest($cert, $algo2digest->(shift() || 'sha256'));
 }
 
 sub get_fingerprint {
@@ -2082,7 +2099,7 @@ WARN
 	    my %fp;
 	    for(@accept_fp) {
 		my $fp = $fp{$_->[0]} ||=
-		    Net::SSLeay::X509_get_fingerprint($cert,$_->[0]);
+		    Net::SSLeay::X509_digest($cert,$algo2digest->($_->[0]));
 		return 1 if $fp eq $_->[1];
 	    }
 	}
