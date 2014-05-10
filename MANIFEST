@@ -37,6 +37,7 @@ t/core.t
 t/dhe.t
 t/ecdhe.t
 t/external/usable_ca.t
+t/external/ocsp.t
 t/io-socket-inet6.t
 t/io-socket-ip.t
 t/memleak_bad_handshake.t
@@ -59,6 +60,7 @@ t/sysread_write.t
 t/testlib.pl
 t/verify_fingerprint.t
 t/verify_hostname.t
-util/export_certs.pl
+util/analyze-ssl.pl
+util/https_ocsp_bulk.pl
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
