@@ -12,7 +12,6 @@ certs/server-wildcard.pem
 certs/test-ca.pem
 Changes
 docs/debugging.txt
-docs/net-ssley-ecdh.patch
 example/async_https_server.pl
 example/lwp-with-verifycn.pl
 example/simulate_proxy.pl
@@ -62,6 +61,5 @@ t/verify_fingerprint.t
 t/verify_hostname.t
 t/verify_hostname_standalone.t
 util/analyze-ssl.pl
-util/https_ocsp_bulk.pl
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)

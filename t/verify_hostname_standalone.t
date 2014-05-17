@@ -11,17 +11,29 @@ my ($ca,$key) = CERT_create( CA => 1);
 for my $test (@tests) {
     SKIP: {
 	my ($expect_match,$hostname,$cn,$san_dns,$san_ip) = @$test;
-	my @san;
+	my (@san,$ip6);
 	push @san, map { [ "DNS", $_ ] } $san_dns =~m{([^,\s]+)}g if $san_dns;
 	for( ($san_ip||'') =~m{([^,\s]+)}g ) {
 	    if ( my @h = m{^x(.{4})(.{4})(.{4})(.{4})(.{4})(.{4})(.{4})(.{4})$}) {
-		$_ = join(':',@h)
+		$_ = join(':',@h);
+		$ip6 = 1;
 	    }
 	    push @san, [ "IP", $_ ];
 	}
+	my $idn = $hostname =~m{[^a-zA-Z0-9_.\-]};
+
 	my $diag = "$hostname: cn=$cn san=".
 	    join(",", map { "$_->[0]:$_->[1]" } @san);
 	$diag =~s{([\\\x00-\x1f\x7f-\xff])}{ sprintf("\\x%02x",ord($1)) }esg;
+
+	if ($ip6 && !IO::Socket::SSL->can_ipv6) {
+	    skip "no IPv6 support - $diag",1;
+	}
+	if ($idn && ! eval { IO::Socket::SSL::idn_to_ascii("fo") }) {
+	    skip "no IDNA library installed - $diag",1
+	}
+
+
 	my %cert = (
 	    subject => length($cn) ? { CN => $cn }:{},
 	    @san ? ( subjectAltNames => \@san ):(),
