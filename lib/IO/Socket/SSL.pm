@@ -29,7 +29,7 @@ BEGIN {
 
 
 
-our $VERSION = '1.987';
+our $VERSION = '1.988';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -1842,10 +1842,11 @@ use strict;
 my %CTX_CREATED_IN_THIS_THREAD;
 *DEBUG = *IO::Socket::SSL::DEBUG;
 
-# should be better taken from Net::SSLeay, but they are not (yet) defined there
 use constant SSL_MODE_ENABLE_PARTIAL_WRITE => 1;
 use constant SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER => 2;
 
+use constant FILETYPE_PEM => Net::SSLeay::FILETYPE_PEM();
+use constant FILETYPE_ASN1 => Net::SSLeay::FILETYPE_ASN1();
 
 # Note that the final object will actually be a reference to the scalar
 # (C-style pointer) returned by Net::SSLeay::CTX_*_new() so that
@@ -1945,7 +1946,7 @@ sub new {
 			"Cannot determine peer hostname for verification" );
 		    return 0;
 		}
-		warn "Cannot determine hostname if peer for verification. ".
+		warn "Cannot determine hostname of peer for verification. ".
 		    "Disabling default hostname verification for now. ".
 		    "Please specify hostname with SSL_verifycn_name and better set SSL_verifycn_scheme too.\n";
 		return $ok;
@@ -2095,7 +2096,6 @@ WARN
     }
 
     if ($arg_hash->{'SSL_server'} || $arg_hash->{'SSL_use_cert'}) {
-	my $filetype = Net::SSLeay::FILETYPE_PEM();
 
 	if ($arg_hash->{'SSL_passwd_cb'}) {
 	    Net::SSLeay::CTX_set_default_passwd_cb($ctx, $arg_hash->{'SSL_passwd_cb'});
@@ -2120,15 +2120,7 @@ WARN
 	    my $snictx = $sni->{ctx} ||= $ctx_new_sub->() or return
 		IO::Socket::SSL->error("SSL Context init failed");
 
-	    if ( my $pkey = $sni->{SSL_key} ) {
-		# binary, e.g. EVP_PKEY*
-		Net::SSLeay::CTX_use_PrivateKey($snictx, $pkey)
-		    || return IO::Socket::SSL->error("Failed to use Private Key");
-	    } elsif ( my $f = $sni->{SSL_key_file} ) {
-		Net::SSLeay::CTX_use_PrivateKey_file($snictx, $f, $filetype)
-		    || return IO::Socket::SSL->error("Failed to open Private Key");
-	    }
-
+	    my ($havekey,$havecert);
 	    if ( my $x509 = $sni->{SSL_cert} ) {
 		# binary, e.g. X509*
 		# we have either a single certificate or a list with
@@ -2141,10 +2133,58 @@ WARN
 		    Net::SSLeay::CTX_add_extra_chain_cert( $snictx,$ca )
 			|| return IO::Socket::SSL->error("Failed to use Certificate");
 		}
+		$havecert = 'OBJ';
 	    } elsif ( my $f = $sni->{SSL_cert_file} ) {
-		Net::SSLeay::CTX_use_certificate_chain_file($snictx, $f)
-		    || return IO::Socket::SSL->error("Failed to open Certificate");
+		# try to load chain from PEM or certificate from ASN1
+		if (Net::SSLeay::CTX_use_certificate_chain_file($snictx,$f)) {
+		    $havecert = 'PEM';
+		} elsif (Net::SSLeay::CTX_use_certificate_file($snictx,$f,FILETYPE_ASN1)) {
+		    $havecert = 'DER';
+		} else {
+		    # try to load certificate, key and chain from PKCS12 file
+		    my ($key,$cert,@chain) = Net::SSLeay::P_PKCS12_load_file($f,1);
+		    if (!$cert and $arg_hash->{SSL_passwd_cb}
+			and defined( my $pw = $arg_hash->{SSL_passwd_cb}->(0))) {
+			($key,$cert,@chain) = Net::SSLeay::P_PKCS12_load_file($f,1,$pw);
+		    }
+		    PKCS12: while ($cert) {
+			Net::SSLeay::CTX_use_certificate($snictx,$cert) or last;
+			for my $ca (@chain) {
+			    Net::SSLeay::CTX_add_extra_chain_cert($snictx,$ca)
+				or last PKCS12;
+			}
+			last if $key && ! Net::SSLeay::CTX_use_PrivateKey($snictx,$key);
+			$havecert = 'PKCS12';
+			last;
+		    }
+		    $havekey = 'PKCS12' if $key;
+		    Net::SSLeay::X509_free($cert) if $cert;
+		    Net::SSLeay::EVP_PKEY_free($key) if $key;
+		    # don't free @chain, because CTX_add_extra_chain_cert
+		    # did not duplicate the certificates
+		}
+		$havecert or return	
+		    IO::Socket::SSL->error("Failed to use certificate file");
 	    }
+
+	    if ($havekey) {
+		# skip SSL_key_*
+	    } elsif ( my $pkey = $sni->{SSL_key} ) {
+		# binary, e.g. EVP_PKEY*
+		Net::SSLeay::CTX_use_PrivateKey($snictx, $pkey)
+		    || return IO::Socket::SSL->error("Failed to use Private Key");
+		$havekey = 'MEM';
+	    } elsif ( my $f = $sni->{SSL_key_file} 
+		|| (($havecert eq 'PEM') ? $sni->{SSL_cert_file}:undef) ) {
+		for my $ft ( FILETYPE_PEM, FILETYPE_ASN1 ) {
+		    if (Net::SSLeay::CTX_use_PrivateKey_file($snictx,$f,$ft)) {
+			$havekey = ($ft == FILETYPE_PEM) ? 'PEM':'DER';
+			last;
+		    }
+		}
+	    }
+	    $havekey or return 
+		IO::Socket::SSL->error("Failed to use private key");
 	}
 
 	if ( keys %sni > 1 or ! exists $sni{''} ) {
@@ -3032,12 +3072,20 @@ when creating the socket.
 If you create a server you usually need to specify a server certificate which
 should be verified by the client. Same is true for client certificates, which
 should be verified by the server.
-The certificate can be given as a file in PEM format with SSL_cert_file or
-as an internal representation of a X509* object with SSL_cert.
+The certificate can be given as a file with SSL_cert_file or as an internal 
+representation of a X509* object with SSL_cert.
+If given as a file it will automatically detect the format. 
+Supported file formats are PEM, DER and PKCS#12, where PEM and PKCS#12 can
+contain the certicate and the chain to use, while DER can only contain a single
+certificate.
 
-For each certificate a key is need, which can either be given as a file in PEM
-format with SSL_key_file or as an internal representation of a EVP_PKEY* object
-with SSL_key.
+For each certificate a key is need, which can either be given as a file with
+SSL_key_file or as an internal representation of a EVP_PKEY* object with
+SSL_key.
+If a key was already given within the PKCS#12 file specified by SSL_cert_file
+it will ignore any SSL_key or SSL_key_file.
+If no SSL_key or SSL_key_file was given it will try to use the PEM file given
+with SSL_cert_file again, maybe it contains the key too.
 
 If your SSL server should be able to use different certificates on the same IP
 address, depending on the name given by SNI, you can use a hash reference
