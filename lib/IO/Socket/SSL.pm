@@ -29,7 +29,7 @@ BEGIN {
 
 
 
-our $VERSION = '1.988';
+our $VERSION = '1.989';
 
 use constant SSL_VERIFY_NONE => Net::SSLeay::VERIFY_NONE();
 use constant SSL_VERIFY_PEER => Net::SSLeay::VERIFY_PEER();
@@ -224,12 +224,14 @@ BEGIN {
     my $ip6 = eval {
 	require Socket;
 	Socket->VERSION(1.95);
+	my $ok = Socket::inet_pton( AF_INET6(),'::1') && AF_INET6();
 	Socket->import( qw/inet_pton getnameinfo NI_NUMERICHOST NI_NUMERICSERV/ );
-	inet_pton( AF_INET6(),'::1') && AF_INET6();
+	$ok;
     } || eval {
 	require Socket6;
+	my $ok = Socket6::inet_pton( AF_INET6(),'::1') && AF_INET6();
 	Socket6->import( qw/inet_pton getnameinfo NI_NUMERICHOST NI_NUMERICSERV/ );
-	inet_pton( AF_INET6(),'::1') && AF_INET6();
+	$ok;
     };
 
     # try IO::Socket::IP or IO::Socket::INET6 for IPv6 support
@@ -3078,6 +3080,12 @@ If given as a file it will automatically detect the format.
 Supported file formats are PEM, DER and PKCS#12, where PEM and PKCS#12 can
 contain the certicate and the chain to use, while DER can only contain a single
 certificate.
+
+If given as a list of X509* please note, that the all the chain certificates
+(e.g. all except the first) will be "consumed" by openssl and will be freed
+if the SSL context gets destroyed - so you should never free them yourself. But
+the servers certificate (e.g. the first) will not be consumed by openssl and
+thus must be freed by the application.
 
 For each certificate a key is need, which can either be given as a file with
 SSL_key_file or as an internal representation of a EVP_PKEY* object with
