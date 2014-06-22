@@ -49,6 +49,7 @@ t/memleak_bad_handshake.t
 t/mitm.t
 t/nonblock.t
 t/npn.t
+t/plain_upgrade_downgrade.t
 t/public_suffix_lib_encode_idn.t
 t/public_suffix_lib_libidn.t
 t/public_suffix_lib.pl
@@ -67,4 +68,5 @@ t/verify_fingerprint.t
 t/verify_hostname_standalone.t
 t/verify_hostname.t
 util/analyze-ssl.pl
-META.yml                                 Module meta-data (added by MakeMaker)
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)
