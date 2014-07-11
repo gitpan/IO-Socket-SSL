@@ -13,7 +13,7 @@
 
 package IO::Socket::SSL;
 
-our $VERSION = '1.994';
+our $VERSION = '1.995';
 
 use IO::Socket;
 use Net::SSLeay 1.46;
@@ -139,14 +139,17 @@ my %DEFAULT_SSL_CLIENT_ARGS = (
     )
 );
 
-my %DEFAULT_SSL_SERVER_ARGS = (
-    %DEFAULT_SSL_ARGS,
-    SSL_verify_mode => SSL_VERIFY_NONE,
-    SSL_honor_cipher_order => 1,   # trust server to know the best cipher
-    SSL_dh => do {
-	my $bio = Net::SSLeay::BIO_new(Net::SSLeay::BIO_s_mem());
-	# generated with: openssl dhparam 2048
-	Net::SSLeay::BIO_write($bio,<<'DH');
+my %DEFAULT_SSL_SERVER_ARGS;
+# set values inside INIT to work with perlcc, RT#95452
+INIT {
+    %DEFAULT_SSL_SERVER_ARGS = (
+	%DEFAULT_SSL_ARGS,
+	SSL_verify_mode => SSL_VERIFY_NONE,
+	SSL_honor_cipher_order => 1,   # trust server to know the best cipher
+	SSL_dh => do {
+	    my $bio = Net::SSLeay::BIO_new(Net::SSLeay::BIO_s_mem());
+	    # generated with: openssl dhparam 2048
+	    Net::SSLeay::BIO_write($bio,<<'DH');
 -----BEGIN DH PARAMETERS-----
 MIIBCAKCAQEAr8wskArj5+1VCVsnWt/RUR7tXkHJ7mGW7XxrLSPOaFyKyWf8lZht
 iSY2Lc4oa4Zw8wibGQ3faeQu/s8fvPq/aqTxYmyHPKCMoze77QJHtrYtJAosB9SY
@@ -156,13 +159,14 @@ Ps2vlkxjAHjJcqc3O+OiImKik/X2rtBTZjpKmzN3WWTB0RJZCOWaLlDO81D01o1E
 aZecz3Np9KIYey900f+X7zC2bJxEHp95ywIBAg==
 -----END DH PARAMETERS-----
 DH
-	my $dh = Net::SSLeay::PEM_read_bio_DHparams($bio);
-	Net::SSLeay::BIO_free($bio);
-	$dh or die "no DH";
-	$dh;
-    },
-    $can_ecdh ? ( SSL_ecdh_curve => 'prime256v1' ):(),
-);
+	    my $dh = Net::SSLeay::PEM_read_bio_DHparams($bio);
+	    Net::SSLeay::BIO_free($bio);
+	    $dh or die "no DH";
+	    $dh;
+	},
+	$can_ecdh ? ( SSL_ecdh_curve => 'prime256v1' ):(),
+    );
+}
 
 # global defaults which can be changed using set_defaults
 # either key/value can be set or it can just be set to an external hash
@@ -267,13 +271,17 @@ BEGIN {
 
     #Compatibility
     *ERROR = \$SSL_ERROR;
+}
 
-    # Do Net::SSLeay initialization
+
+# initialize OpenSSL inside init because of perlcc, RT#95452
+INIT {
     Net::SSLeay::load_error_strings();
     Net::SSLeay::SSLeay_add_ssl_algorithms();
     Net::SSLeay::OpenSSL_add_all_digests();
     Net::SSLeay::randomize();
 }
+
 
 sub DEBUG {
     $DEBUG or return;
@@ -1398,9 +1406,11 @@ if ( defined &Net::SSLeay::get_peer_cert_chain
     $dispatcher{cn}        = $dispatcher{commonName};
 
     sub peer_certificate {
-	my ($self, $field) = @_;
+	my ($self,$field,$reload) = @_;
 	my $ssl = $self->_get_ssl_object or return;
 
+	Net::SSLeay::X509_free(delete ${*$self}{_SSL_certificate})
+	    if $reload && ${*$self}{_SSL_certificate};
 	my $cert = ${*$self}{_SSL_certificate}
 	    ||= Net::SSLeay::get_peer_certificate($ssl)
 	    or return $self->error("Could not retrieve peer certificate");
@@ -2003,12 +2013,11 @@ sub new {
 
 	my $vcb = $arg_hash->{SSL_verify_callback};
 	$arg_hash->{SSL_verify_callback} = sub {
-	    my ($ok,$ctx_store,$certname,$error,$cert) = @_;
-	    $ok = $vcb->($ok,$ctx_store,$certname,$error,$cert) if $vcb;
+	    my ($ok,$ctx_store,$certname,$error,$cert,$depth) = @_;
+	    $ok = $vcb->($ok,$ctx_store,$certname,$error,$cert,$depth) if $vcb;
 	    $ok or return 0;
 
-	    return $ok if
-		Net::SSLeay::X509_STORE_CTX_get_error_depth($ctx_store) !=0;
+	    return $ok if $depth != 0;
 
 	    my $host = $verify_name || ref($vcn_scheme) && $vcn_scheme->{callback} && 'unknown';
 	    if ( ! $host ) {
@@ -2329,27 +2338,39 @@ WARN
 	    push @accept_fp,[ $algo, pack('H*',$digest) ]
 	}
     }
-    my $verify_callback = ( $verify_cb || @accept_fp) && sub {
-	my ($ok, $ctx_store) = @_;
-	my ($certname,$cert,$error);
-	if ($ctx_store) {
-	    $cert = Net::SSLeay::X509_STORE_CTX_get_current_cert($ctx_store);
-	    $error = Net::SSLeay::X509_STORE_CTX_get_error($ctx_store);
-	    $certname = Net::SSLeay::X509_NAME_oneline(Net::SSLeay::X509_get_issuer_name($cert)).
-		Net::SSLeay::X509_NAME_oneline(Net::SSLeay::X509_get_subject_name($cert));
-	    $error &&= Net::SSLeay::ERR_error_string($error);
-	}
-	$DEBUG>=3 && DEBUG( "ok=$ok cert=$cert" );
-	if ( $cert && @accept_fp ) {
+    my $verify_fingerprint = @accept_fp && do {
+	my $fail;
+	sub {
+	    my ($ok,$cert,$depth) = @_;
+	    $fail = 1 if ! $ok;
+	    return 1 if $depth>0; # to let us continue with verification
+	    # Check fingerprint only from top certificate.
 	    my %fp;
 	    for(@accept_fp) {
 		my $fp = $fp{$_->[0]} ||=
 		    Net::SSLeay::X509_digest($cert,$algo2digest->($_->[0]));
-		return 1 if $fp eq $_->[1];
+		next if $fp ne $_->[1];
+		return 1;
 	    }
+	    return ! $fail;
 	}
-	return $ok if ! $verify_cb;
-	return $verify_cb->($ok,$ctx_store,$certname,$error,$cert);
+    };
+    my $verify_callback = ( $verify_cb || @accept_fp ) && sub {
+	my ($ok, $ctx_store) = @_;
+	my ($certname,$cert,$error,$depth);
+	if ($ctx_store) {
+	    $cert  = Net::SSLeay::X509_STORE_CTX_get_current_cert($ctx_store);
+	    $error = Net::SSLeay::X509_STORE_CTX_get_error($ctx_store);
+	    $depth = Net::SSLeay::X509_STORE_CTX_get_error_depth($ctx_store);
+	    $certname =
+		Net::SSLeay::X509_NAME_oneline(Net::SSLeay::X509_get_issuer_name($cert)).
+		Net::SSLeay::X509_NAME_oneline(Net::SSLeay::X509_get_subject_name($cert));
+	    $error &&= Net::SSLeay::ERR_error_string($error);
+	}
+	$DEBUG>=3 && DEBUG( "ok=$ok cert=$cert" );
+	$ok = $verify_cb->($ok,$ctx_store,$certname,$error,$cert,$depth) if $verify_cb;
+	$ok = $verify_fingerprint->($ok,$cert,$depth) if $verify_fingerprint && $cert;
+	return $ok;
     };
 
     if ( $^O eq 'darwin' ) {
