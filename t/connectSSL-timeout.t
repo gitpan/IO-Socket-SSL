@@ -1,7 +1,6 @@
 use strict;
 use warnings;
 use IO::Socket::SSL;
-
 do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 $|=1;

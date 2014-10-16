@@ -4,10 +4,9 @@ use Test::More;
 use IO::Socket::SSL;
 use IO::Socket::SSL::Utils;
 use File::Temp 'tempfile';
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 plan tests => 12;
-plan skip_all => "fork not implemented on this platform"
-    if $^O =~m{MacOS|VOS|vmesa|riscos|amigaos};
 
 my ($ca1,$cakey1) = CERT_create( CA => 1, subject => { CN => 'ca1' });
 my ($cert1,$key1) = CERT_create( 

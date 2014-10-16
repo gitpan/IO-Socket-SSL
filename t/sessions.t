@@ -7,14 +7,7 @@ use warnings;
 use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
-
-
-foreach ($^O) {
-    if (/MacOS/ or /VOS/ or /vmesa/ or /riscos/ or /amigaos/) {
-	print "1..0 # Skipped: fork not implemented on this platform\n";
-	exit;
-    }
-}
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 $|=1;
 my $numtests = 35;

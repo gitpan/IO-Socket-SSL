@@ -13,7 +13,7 @@
 
 package IO::Socket::SSL;
 
-our $VERSION = '1.999';
+our $VERSION = '2.000';
 
 use IO::Socket;
 use Net::SSLeay 1.46;
@@ -83,7 +83,7 @@ my $algo2digest = do {
 # global defaults
 my %DEFAULT_SSL_ARGS = (
     SSL_check_crl => 0,
-    SSL_version => 'SSLv23:!SSLv2',
+    SSL_version => 'SSLv23:!SSLv3:!SSLv2', # consider both SSL3.0 and SSL2.0 as broken
     SSL_verify_callback => undef,
     SSL_verifycn_scheme => undef,  # fallback cn verification
     SSL_verifycn_publicsuffix => undef,  # fallback default list verification

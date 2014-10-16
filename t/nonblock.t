@@ -10,19 +10,18 @@ use Socket;
 use IO::Socket::SSL;
 use IO::Select;
 use Errno qw( EAGAIN EINPROGRESS EPIPE ECONNRESET );
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 if ( ! eval "use 5.006; use IO::Select; return 1" ) {
     print "1..0 # Skipped: no support for nonblocking sockets\n";
     exit;
 }
-if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
-    print "1..0 # Skipped: fork not implemented on this platform\n";
-    exit
-}
+
+
 
 if ( $^O =~m{mswin32}i ) {
-	print "1..0 # Skipped: nonblocking does not work on Win32\n";
-	exit
+    print "1..0 # Skipped: nonblocking does not work on Win32\n";
+    exit
 }
 
 $SIG{PIPE} = 'IGNORE'; # use EPIPE not signal handler

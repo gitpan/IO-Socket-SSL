@@ -5,11 +5,7 @@ use warnings;
 use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
-
-if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
-    print "1..0 # Skipped: fork not implemented on this platform\n";
-    exit
-}
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 if ( $^O =~m{mswin32}i ) {
     print "1..0 # Skipped: signals not relevant on this platform\n";

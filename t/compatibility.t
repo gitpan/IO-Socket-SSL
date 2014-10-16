@@ -6,15 +6,9 @@ use strict;
 use warnings;
 use IO::Socket::SSL;
 use Socket;
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 $|=1;
-
-foreach ($^O) {
-    if (/MacOS/ or /VOS/ or /vmesa/ or /riscos/ or /amigaos/) {
-	print "1..0 # Skipped: fork not implemented on this platform\n";
-	exit;
-    }
-}
 
 $SIG{'CHLD'} = "IGNORE";
 

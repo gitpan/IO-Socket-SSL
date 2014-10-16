@@ -8,14 +8,9 @@ use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
 use Errno 'EAGAIN';
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 $|=1;
-foreach ($^O) {
-    if (/MacOS/ or /VOS/ or /vmesa/ or /riscos/ or /amigaos/) {
-	print "1..0 # Skipped: fork not implemented on this platform\n";
-	exit;
-    }
-}
 
 my $CAN_NONBLOCK = $^O =~m{mswin32}i ? 0 : eval "use 5.006; use IO::Select; 1";
 my $CAN_PEEK = &Net::SSLeay::OPENSSL_VERSION_NUMBER >= 0x0090601f;

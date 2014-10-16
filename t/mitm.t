@@ -6,11 +6,7 @@ use Net::SSLeay;
 use Socket;
 use IO::Socket::SSL;
 use IO::Socket::SSL::Intercept;
-
-if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
-    print "1..0 # Skipped: fork not implemented on this platform\n";
-    exit
-}
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 print "1..8\n";
 

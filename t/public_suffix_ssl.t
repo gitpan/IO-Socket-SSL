@@ -3,10 +3,7 @@ use warnings;
 use IO::Socket::SSL;
 use IO::Socket::SSL::Utils;
 use Test::More;
-
-if ( grep { $^O =~m{$_} } qw( MacOS VOS vmesa riscos amigaos ) ) {
-    plan skip_all => "fork not implemented on this platform";
-}
+do './testlib.pl' || do './t/testlib.pl' || die "no testlib";
 
 my @tests = qw(
     fail:com|*
