@@ -13,7 +13,7 @@
 
 package IO::Socket::SSL;
 
-our $VERSION = '2.000';
+our $VERSION = '2.001';
 
 use IO::Socket;
 use Net::SSLeay 1.46;
@@ -2091,6 +2091,8 @@ WARN
     }
 
     my $ssl_op = Net::SSLeay::OP_ALL();
+    $ssl_op |= &Net::SSLeay::OP_SINGLE_DH_USE;
+    $ssl_op |= &Net::SSLeay::OP_SINGLE_ECDH_USE if $can_ecdh;
 
     my $ver;
     for (split(/\s*:\s*/,$arg_hash->{SSL_version})) {
