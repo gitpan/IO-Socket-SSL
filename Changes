@@ -1,3 +1,12 @@
+2.003 2014/11/14
+- make SSLv3 available even if the SSL library disables it by default in
+  SSL_CTX_new (like done in LibreSSL). Default will stay to disable SSLv3,
+  so this will be only done when setting SSL_version explicitly.
+- fix possible segmentation fault when trying to use an invalid certificate,
+  reported by Nick Andrew.
+- Use only the ICANN part of the default public suffix list and not the
+  private domains. This makes existing exceptions for s3.amazonaws.com and
+  googleapis.com obsolete. Thanks to Gervase Markham from mozilla.org.
 2.002 2014/10/21
 - fix check for (invalid) IPv4 when validating hostname against certificate. Do
   not use inet_aton any longer because it can cause DNS lookups for malformed
