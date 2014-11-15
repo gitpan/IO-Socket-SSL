@@ -1,3 +1,8 @@
+2.004_1 2014/11/15
+- Use EWOULDBLOCK instead of EAGAIN. While this is the same on UNIX it is
+  different on Windows and socket operations return there (WSA)EWOULDBLOCK and
+  not EAGAIN. Enable non-blocking tests on Windows too.
+- Use only the ICAN part of the default public suffix list and not the
 2.004 2014/11/15
 - only test fix: fix t/protocol_version.t to deal with OpenSSL installations
   which are compiled without SSLv3 support.
